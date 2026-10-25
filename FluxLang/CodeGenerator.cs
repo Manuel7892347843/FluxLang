@@ -37,7 +37,6 @@ public class CodeGenerator
         _isWindows = activeOs.Contains("win");
         _p = _isWindows ? "" : "_";
 
-        // Configura i registri corretti per la Calling Convention dell'OS specifico
         if (_isWindows)
         {
             ParameterRegisters = new string[] { "rcx", "rdx", "r8", "r9" };
@@ -233,7 +232,6 @@ public class CodeGenerator
         {
             int offset = _stackMap[freeNode.VarName];
             
-            // Gestione cross-platform del registro di input della funzione (RDI o RCX)
             string targetReg = _isWindows ? "rcx" : "rdi";
             _asm.AppendLine($"   mov {targetReg}, [rbp{offset}]  ; Recovers the address to free");
             _asm.AppendLine($"   call {p}free  ; Frees the memory");
@@ -247,7 +245,6 @@ public class CodeGenerator
             string type = _typeMap.ContainsKey(derefNode.PointerName) ? _typeMap[derefNode.PointerName] : "ptr";
             int elementSize = type.Contains("*char") || type == "char" ? 1 : 8;
 
-            // Uso sicuro di rdx come registro temporaneo indipendente
             _asm.AppendLine($"   mov rdx, [rbp{offset}]    ; Recovers the pointer {derefNode.PointerName} address");
             _asm.AppendLine("   pop rax     ; Restore value to write");
 
@@ -268,12 +265,11 @@ public class CodeGenerator
             }
             string type = _typeMap.ContainsKey(printNode.VarName) ? _typeMap[printNode.VarName] : "int";
 
-            string r1 = _isWindows ? "rcx" : "rdi"; // Primo parametro (formato)
-            string r2 = _isWindows ? "rdx" : "rsi"; // Secondo parametro (valore)
+            string r1 = _isWindows ? "rcx" : "rdi";
+            string r2 = _isWindows ? "rdx" : "rsi";
 
             if (printNode.IsMemory)
             {
-                // Carica prima il puntatore in un registro temporaneo per dereferenziarlo
                 _asm.AppendLine($"   mov rax, [rbp{offset}]    ; Recovers the address of {printNode.VarName}");
 
                 if (type.Contains("*char") || type == "char")
@@ -409,7 +405,6 @@ public class CodeGenerator
                 _asm.AppendLine("   push rax        ; Save index");
                 GenerateExpression(arrayAssign.Value, p);
                 _asm.AppendLine("   mov rcx, rax    ; Value to write in RCX");
-                // In Windows non possiamo sovrascrivere Shadow Space se non siamo attenti, ma qui siamo dentro lo stack locale
                 _asm.AppendLine("   pop rax         ; Restore index in RAX");
                 _asm.AppendLine($"   mov rdx, [rbp{offset}]  ; Load array base address");
                 if (elementSize == 8)

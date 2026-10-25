@@ -11,7 +11,6 @@ class Program
     {
         string os = GetArgValue(args, "-os", "");
         
-        // 1. Estrae correttamente il percorso del file sorgente
         string fileNameFull = GetArgValue(args, "-file", "");
 
         if (string.IsNullOrEmpty(fileNameFull)) 
@@ -45,7 +44,7 @@ class Program
         Parser parser = new Parser(tokens, fileNameFull);
         ProgramNode ast = parser.Parse();
         
-        //3. Code Generator (Passa la variabile 'os' al metodo Generate)
+        //3. Code Generator
         CodeGenerator generator = new CodeGenerator(ast);
         string asseblyCode = generator.Generate(os);
         
@@ -78,7 +77,6 @@ class Program
             Directory.CreateDirectory(exeDir);
         }
         
-        // Aggiunge automaticamente l'estensione .exe se siamo su piattaforma Windows
         string extension = (os == "win64" || os == "win32") ? ".exe" : "";
         string exePath = Path.Combine(exeDir, fileName + extension);
 
