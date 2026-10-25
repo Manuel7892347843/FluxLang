@@ -1,0 +1,31 @@
+int strlen(*char s) {
+    int len = 0;
+    while (s[len] != 0) {
+        len = len + 1;
+    }
+    return len;
+}
+
+int strcmp(*char s1, *char s2) {
+    int i = 0;
+    while (s1[i] != 0 && s2[i] != 0) {
+        if (s1[i] != s2[i]) {
+            return s1[i] - s2[i];
+        }
+        i = i + 1;
+    }
+    return s1[i] - s2[i];
+}
+
+void strcat(*char dest, *char src) {
+    int d_len = strlen(dest);
+    int i = 0;
+    while (src[i] != 0) {
+        int idx = d_len + i;
+        char c = src[i];
+        dest[idx] = c;
+        i = i + 1;
+    }
+    int last_idx = d_len + i;
+    dest[last_idx] = 0;
+}

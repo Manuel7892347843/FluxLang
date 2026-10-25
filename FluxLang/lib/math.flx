@@ -1,0 +1,36 @@
+int pow(int base, int exponent){
+    int ris = 1;
+    while (exponent > 0) {
+        ris = ris * base;
+        exponent = exponent - 1;
+    }
+    return ris;
+}
+
+int abs(int n){
+    if(n < 0){
+        return n * -1;
+    }
+    return n;
+}
+
+int min(int a, int b){
+    if(a < b){
+        return a;
+    }
+    return b;
+}
+
+int max(int a, int b){
+    if(a > b){
+        return a;
+    }
+    return b;
+}
+
+int factorial(int n){
+    if(n == 0){
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
