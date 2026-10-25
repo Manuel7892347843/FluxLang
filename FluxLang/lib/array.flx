@@ -1,0 +1,37 @@
+void array_fill(*int arr, int size, int value) {
+    int i = 0;
+    while (i < size) {
+        arr[i] = value;
+        i = i + 1;
+    }
+}
+
+void array_copy(*int dest, *int src, int size) {
+    int i = 0;
+    while (i < size) {
+        dest[i] = src[i];
+        i = i + 1;
+    }
+}
+
+int array_sum(*int arr, int size) {
+    int sum = 0;
+    int i = 0;
+    while (i < size) {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    return sum;
+}
+
+void array_reverse(*int arr, int size) {
+    int i = 0;
+    int j = size - 1;
+    while (i < j) {
+        int temp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = temp;
+        i = i + 1;
+        j = j - 1;
+    }
+}

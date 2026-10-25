@@ -1,0 +1,33 @@
+void bubble_sort(*int arr, int size) {
+    int i = 0;
+    while (i < size) {
+        int j = 0;
+        int limit = size - i - 1;
+        while (j < limit) {
+            if (arr[j] > arr[j + 1]) {
+                int temp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+int binary_search(*int arr, int size, int target) {
+    int low = 0;
+    int high = size - 1;
+    while (low <= high) {
+        int mid = low + (high - low) / 2;
+        if (arr[mid] == target) {
+            return mid;
+        }
+        if (arr[mid] < target) {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return -1;
+}

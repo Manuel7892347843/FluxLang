@@ -89,6 +89,9 @@ public class Lexer
                     case "input":
                         tokens.Add(new Token(TokenType.Input, ident));
                         break;
+                    case "input_str":
+                        tokens.Add(new Token(TokenType.InputStr, ident));
+                        break;
                     case "while":
                         tokens.Add(new Token(TokenType.While, ident));
                         break;
@@ -109,6 +112,12 @@ public class Lexer
                         break;
                     case "sleep":
                         tokens.Add(new Token(TokenType.Sleep, ident));
+                        break;
+                    case "rand":
+                        tokens.Add(new Token(TokenType.Rand, ident));
+                        break;
+                    case "srand":
+                        tokens.Add(new Token(TokenType.Srand, ident));
                         break;
                     default:
                         tokens.Add(new Token(TokenType.Identifier, ident));
@@ -213,7 +222,34 @@ public class Lexer
                     string text = "";
                     while (Current != '"')
                     {
-                        text += Current;
+                        if (Current == '\\')
+                        {
+                            Advance();
+                            switch (Current)
+                            {
+                                case 'n':
+                                    text += '\n';
+                                    break;
+                                case 'r':
+                                    text += '\r';
+                                    break;
+                                case '\t':
+                                    text += '\t';
+                                    break;
+                                case '\\':
+                                    text += '\\';
+                                    break;
+                                case '"':
+                                    text += '"';
+                                    break;
+                                default:
+                                    text += '\\';
+                                    text += Current;
+                                    break;
+                            }
+                        }
+                        else
+                            text += Current;
                         Advance();
                     }
 
@@ -231,6 +267,10 @@ public class Lexer
                     break;
                 case '+':
                     tokens.Add(new Token(TokenType.Plus, "+"));
+                    Advance();
+                    break;
+                case '%':
+                    tokens.Add(new Token(TokenType.Percent, "%"));
                     Advance();
                     break;
                 case '/':

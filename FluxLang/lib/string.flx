@@ -29,3 +29,88 @@ void strcat(*char dest, *char src) {
     int last_idx = d_len + i;
     dest[last_idx] = 0;
 }
+
+int str_to_int(*char s) {
+    int res = 0;
+    int i = 0;
+    int sign = 1;
+    
+    if (s[0] == '-') {
+        sign = -1;
+        i = 1;
+    }
+    
+    while (s[i] != 0) {
+        if (s[i] >= '0' && s[i] <= '9') {
+            res = res * 10 + (s[i] - '0');
+        }
+        i = i + 1;
+    }
+    
+    return res * sign;
+}
+
+void int_to_str(int n, *char buffer) {
+    if (n == 0) {
+        buffer[0] = '0';
+        buffer[1] = 0;
+        return;
+    }
+    
+    int isNegative = 0;
+    if (n < 0) {
+        isNegative = 1;
+        n = -n;
+    }
+    
+    int temp = n;
+    int len = 0;
+    while (temp > 0) {
+        temp = temp / 10;
+        len = len + 1;
+    }
+    
+    if (isNegative == 1) {
+        buffer[0] = '-';
+        len = len + 1;
+    }
+    
+    buffer[len] = 0;
+    int j = len - 1;
+    while (n > 0) {
+        buffer[j] = (n % 10) + '0';
+        n = n / 10;
+        j = j - 1;
+    }
+}
+
+int str_contains(*char s, char c) {
+    int i = 0;
+    while (s[i] != 0) {
+        if (s[i] == c) {
+            return 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+void str_upper(*char s) {
+    int i = 0;
+    while (s[i] != 0) {
+        if (s[i] >= 'a' && s[i] <= 'z') {
+            s[i] = s[i] - 32;
+        }
+        i = i + 1;
+    }
+}
+
+void str_lower(*char s) {
+    int i = 0;
+    while (s[i] != 0) {
+        if (s[i] >= 'A' && s[i] <= 'Z') {
+            s[i] = s[i] + 32;
+        }
+        i = i + 1;
+    }
+}

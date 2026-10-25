@@ -252,6 +252,20 @@ public class SleepNode : AstNode
     }
 }
 
+public class RandNode : AstNode
+{
+    public RandNode() { }
+}
+
+public class SrandNode : AstNode
+{
+    public AstNode Seed { get; }
+    public SrandNode(AstNode seed)
+    {
+        Seed = seed;
+    }
+}
+
 public class AssignmentNode : AstNode
 {
     public string Name { get; }
@@ -313,6 +327,18 @@ public class DoubleSlashNode : AstNode
 }
 
 public class InputNode : AstNode { }
+
+public class InputStrNode : AstNode
+{
+    public AstNode Buffer { get; }
+    public AstNode MaxLen { get; }
+
+    public InputStrNode(AstNode buffer, AstNode maxLen)
+    {
+        Buffer = buffer;
+        MaxLen = maxLen;
+    }
+}
 
 public class ArrayAccessNode : AstNode
 {

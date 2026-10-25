@@ -23,6 +23,7 @@ public enum TokenType
     Minus,
     Slash,
     SlashSlash,
+    Percent,
     
     If,
     Else,
@@ -54,8 +55,11 @@ public enum TokenType
     Sqrt,
     Time,
     Sleep,
+    Rand,
+    Srand,
     
     Input,
+    InputStr,
     OpenBracket,
     CloseBracket,
     

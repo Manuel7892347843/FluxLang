@@ -76,6 +76,10 @@ public class CodeGenerator
         finalAsm.AppendLine("extern _sqrt");
         finalAsm.AppendLine("extern _time");
         finalAsm.AppendLine("extern _usleep");
+        finalAsm.AppendLine("extern _rand");
+        finalAsm.AppendLine("extern _srand");
+        finalAsm.AppendLine("extern _fgets");
+        finalAsm.AppendLine("extern ___stdinp");
         finalAsm.AppendLine();
         
         finalAsm.AppendLine("section .data");
@@ -111,6 +115,15 @@ public class CodeGenerator
         }
         
         return finalAsm.ToString();
+    }
+
+    private string EscapeString(string input)
+    {
+        return input.Replace("\\", "\\\\")
+                    .Replace("\"", "\\\"")
+                    .Replace("\n", "\", 10, \"")
+                    .Replace("\r", "\", 13, \"")
+                    .Replace("\t", "\", 9, \"");
     }
 
     private void GenerateFunction(FunctionDeclNode func)
@@ -269,7 +282,7 @@ public class CodeGenerator
         {
             _msgCount++;
             string msgLabel = $"msg_{_msgCount}";
-            _asmData.AppendLine($"   {msgLabel} db \"{strNode.Text}\", 0");
+            _asmData.AppendLine($"   {msgLabel} db \"{EscapeString(strNode.Text)}\", 0");
             _asm.AppendLine("   lea rdi, [rel format_str]");
             _asm.AppendLine($"   lea rsi, [rel {msgLabel}]");
             _asm.AppendLine("   mov al, 0");
@@ -505,11 +518,22 @@ public class CodeGenerator
             _asm.AppendLine("   mov rax, [rsp]  ; Load the input value to RAX");
             _asm.AppendLine("   add rsp, 16     ; Restore stack pointer");
         }
+        else if (node is InputStrNode inputStr)
+        {
+            GenerateExpression(inputStr.Buffer);
+            _asm.AppendLine("   push rax        ; Save buffer address");
+            GenerateExpression(inputStr.MaxLen);
+            _asm.AppendLine("   mov rsi, rax    ; Max length in RSI");
+            _asm.AppendLine("   pop rdi         ; Buffer address in RDI");
+            _asm.AppendLine("   mov rdx, [rel ___stdinp] ; Load stdin pointer");
+            _asm.AppendLine("   mov rdx, [rdx]  ; Dereference stdin to get FILE*");
+            _asm.AppendLine("   call _fgets");
+        }
         else if (node is StringLiteralNode strLiteral)
         {
             _msgCount++;
             string msgLabel = $"msg_{_msgCount}";
-            _asmData.AppendLine($"   {msgLabel} db \"{strLiteral.Value}\", 0");
+            _asmData.AppendLine($"   {msgLabel} db \"{EscapeString(strLiteral.Value)}\", 0");
             _asm.AppendLine($"   lea rax, [rel {msgLabel}]");
         }
         else if (node is SqrtNode sqrtNode)
@@ -518,6 +542,11 @@ public class CodeGenerator
             _asm.AppendLine("   cvtsi2sd xmm0, rax    ; Convert integer to double");
             _asm.AppendLine("   call _sqrt           ; Call math sqrt(double)");
             _asm.AppendLine("   cvttsd2si rax, xmm0   ; Convert double back to integer (truncate)");
+        }
+        else if (node is RandNode)
+        {
+            _asm.AppendLine("   mov rax, 0");
+            _asm.AppendLine("   call _rand");
         }
         else if (node is TimeNode)
         {
@@ -533,6 +562,13 @@ public class CodeGenerator
             _asm.AppendLine("   mov rax, 0");
             _asm.AppendLine("   call _usleep");
             _asm.AppendLine("   mov rax, 0           ; sleep returns void-like 0");
+        }
+        else if (node is SrandNode srandNode)
+        {
+            GenerateExpression(srandNode.Seed);
+            _asm.AppendLine("   mov rdi, rax");
+            _asm.AppendLine("   mov rax, 0");
+            _asm.AppendLine("   call _srand");
         }
         else if (node is ArrayAccessNode arrayAccess)
         {
@@ -664,6 +700,11 @@ public class CodeGenerator
                 case "/":
                     _asm.AppendLine("   cqo     ; Sign-extend RAX into RDX (required for 64-bit division)");
                     _asm.AppendLine("   idiv rcx    ; RAX = RAX / RCX");
+                    break;
+                case "%":
+                    _asm.AppendLine("   cqo     ; Sign-extend RAX into RDX (required for 64-bit division)");
+                    _asm.AppendLine("   idiv rcx    ; RAX = RAX / RCX, RDX = RAX % RCX");
+                    _asm.AppendLine("   mov rax, rdx ; Return remainder in RAX");
                     break;
                 case "&&":
                     _asm.AppendLine("   cmp rax, 0");

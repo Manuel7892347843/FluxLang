@@ -1,0 +1,22 @@
+import "std.flx";
+
+*void calloc(int count, int size) {
+    int total = count * size;
+    *char p = memory_allocation(total);
+    int i = 0;
+    while (i < total) {
+        p[i] = 0;
+        i = i + 1;
+    }
+    return p;
+}
+
+void memcpy(*void dest, *void src, int n) {
+    *char d = dest;
+    *char s = src;
+    int i = 0;
+    while (i < n) {
+        d[i] = s[i];
+        i = i + 1;
+    }
+}

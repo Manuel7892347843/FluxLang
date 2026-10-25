@@ -1,0 +1,11 @@
+import "std.flx";
+
+void random_init() {
+    srand(time());
+}
+
+int random_range(int min, int max) {
+    if (max <= min) return min;
+    int r = rand();
+    return min + (r % (max - min + 1));
+}

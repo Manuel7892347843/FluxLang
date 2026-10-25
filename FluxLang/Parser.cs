@@ -110,7 +110,7 @@ public class Parser
     private AstNode ParseMultiplicative()
     {
         AstNode left = ParseUnary();
-        while (Current.Type == TokenType.Asterisk || Current.Type == TokenType.Slash)
+        while (Current.Type == TokenType.Asterisk || Current.Type == TokenType.Slash || Current.Type == TokenType.Percent)
         {
             string op = Advance().Value;
             AstNode right = ParseUnary();
@@ -138,6 +138,17 @@ public class Parser
             Match(TokenType.OpenParenthesis, "Missing ( after input");
             Match(TokenType.CloseParenthesis, "Missing ) after input(");
             return new InputNode();
+        }
+
+        if (Current.Type == TokenType.InputStr)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after input_str");
+            AstNode buffer = ParseExpression();
+            Match(TokenType.Comma, "Missing , after buffer in input_str");
+            AstNode maxLen = ParseExpression();
+            Match(TokenType.CloseParenthesis, "Missing ) after input_str(...)");
+            return new InputStrNode(buffer, maxLen);
         }
 
         if (Current.Type == TokenType.Alloc)
@@ -173,6 +184,23 @@ public class Parser
             AstNode duration = ParseExpression();
             Match(TokenType.CloseParenthesis, "Missing ) after sleep()");
             return new SleepNode(duration);
+        }
+
+        if (Current.Type == TokenType.Rand)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after rand");
+            Match(TokenType.CloseParenthesis, "Missing ) after rand()");
+            return new RandNode();
+        }
+
+        if (Current.Type == TokenType.Srand)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after srand");
+            AstNode seed = ParseExpression();
+            Match(TokenType.CloseParenthesis, "Missing ) after srand()");
+            return new SrandNode(seed);
         }
 
         if (Current.Type == TokenType.Asterisk)
@@ -271,13 +299,21 @@ public class Parser
                 
                 string name = Match(TokenType.Identifier, "Expected the name of the variable").Value;
                 
-                // Check for char var[] = "string"
+                // Check for char var[size] = ... or int var[size] = ...
                 if (Current.Type == TokenType.OpenBracket)
                 {
                     Advance();
-                    Match(TokenType.CloseBracket, "Expected ] after [ in array declaration");
+                    AstNode? size = null;
+                    if (Current.Type != TokenType.CloseBracket)
+                    {
+                        size = ParseExpression();
+                    }
+                    Match(TokenType.CloseBracket, "Expected ] after array index in declaration");
+                    
                     if (type == "char") type = "*char";
                     else if (type == "int") type = "*int";
+                    else if (type == "ptr") type = "*ptr";
+                    else if (type == "void") type = "*void";
                 }
 
                 Match(TokenType.Assign, "Expected = after the name of the variable");
@@ -353,25 +389,41 @@ public class Parser
             Match(TokenType.OpenParenthesis, "Missing ( after if");
             AstNode condition = ParseExpression();
             Match(TokenType.CloseParenthesis, "Missing ) before the body of the if");
-            Match(TokenType.OpenBrace, "Missing { to start the if body");
-            var body = new List<AstNode>();
-            while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+            
+            List<AstNode> body = new List<AstNode>();
+            if (Current.Type == TokenType.OpenBrace)
+            {
+                Match(TokenType.OpenBrace, "Missing { to start the if body");
+                while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+                {
+                    body.Add(ParseStatement());
+                }
+                Match(TokenType.CloseBrace, "Missing } to end the if body");
+            }
+            else
             {
                 body.Add(ParseStatement());
             }
-            Match(TokenType.CloseBrace, "Missing } to end the if body");
-            List<AstNode>? elseBody = null;
 
+            List<AstNode>? elseBody = null;
             if (Current.Type == TokenType.Else)
             {
                 Advance();
-                Match(TokenType.OpenBrace, "Missing { to start the else body");
-                elseBody = new List<AstNode>();
-                while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+                if (Current.Type == TokenType.OpenBrace)
                 {
+                    Match(TokenType.OpenBrace, "Missing { to start the else body");
+                    elseBody = new List<AstNode>();
+                    while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+                    {
+                        elseBody.Add(ParseStatement());
+                    }
+                    Match(TokenType.CloseBrace, "Missing } to end the else body");
+                }
+                else
+                {
+                    elseBody = new List<AstNode>();
                     elseBody.Add(ParseStatement());
                 }
-                Match(TokenType.CloseBrace, "Missing } to end the else body");
             }
             return new IfStatementNode(condition, body, elseBody);
         }
@@ -439,6 +491,25 @@ public class Parser
             Match(TokenType.CloseParenthesis, "Missing ) after exit parameter");
             Match(TokenType.Semicolon, "Missing ; after exit");
             return new ExitNode(exitCode);
+        }
+
+        if (Current.Type == TokenType.Rand)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after rand");
+            Match(TokenType.CloseParenthesis, "Missing ) after rand()");
+            Match(TokenType.Semicolon, "Missing ; after rand()");
+            return new RandNode();
+        }
+
+        if (Current.Type == TokenType.Srand)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after srand");
+            AstNode seed = ParseExpression();
+            Match(TokenType.CloseParenthesis, "Missing ) after srand()");
+            Match(TokenType.Semicolon, "Missing ; after srand()");
+            return new SrandNode(seed);
         }
 
         if (Current.Type == TokenType.Sleep)
@@ -711,13 +782,24 @@ public class Parser
                 return true;
             }
 
-            // Case 2: Type name[] = ...
+            // Case 2: Type name[size] = ...
             if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
-                pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.OpenBracket &&
-                pos + 2 < _tokens.Count && _tokens[pos + 2].Type == TokenType.CloseBracket &&
-                pos + 3 < _tokens.Count && _tokens[pos + 3].Type == TokenType.Assign)
+                pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.OpenBracket)
             {
-                return true;
+                int tempPos = pos + 2;
+                // Skip expression inside brackets
+                int bracketCount = 1;
+                while (tempPos < _tokens.Count && bracketCount > 0)
+                {
+                    if (_tokens[tempPos].Type == TokenType.OpenBracket) bracketCount++;
+                    else if (_tokens[tempPos].Type == TokenType.CloseBracket) bracketCount--;
+                    tempPos++;
+                }
+                
+                if (tempPos < _tokens.Count && _tokens[tempPos].Type == TokenType.Assign)
+                {
+                    return true;
+                }
             }
         }
         return false;
