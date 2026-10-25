@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Diagnostics;
 
 namespace FluxLang;
 
@@ -6,8 +9,17 @@ class Program
 {
     static void Main(string[] args)
     {
-        string fileNameFull = args.Length > 0 ? args[0] : throw new Exception("No file specified");
-        if (!File.Exists(fileNameFull)) throw new Exception("File not found");
+        string os = GetArgValue(args, "-os", "");
+        
+        // 1. Estrae correttamente il percorso del file sorgente
+        string fileNameFull = GetArgValue(args, "-file", "");
+
+        if (string.IsNullOrEmpty(fileNameFull)) 
+            throw new Exception("No file specified");
+        
+        if (!File.Exists(fileNameFull)) 
+            throw new Exception($"File not found: {Path.GetFullPath(fileNameFull)}");
+
         string code = File.ReadAllText(fileNameFull);
         
         string fileName = Path.GetFileNameWithoutExtension(fileNameFull);
@@ -33,9 +45,9 @@ class Program
         Parser parser = new Parser(tokens, fileNameFull);
         ProgramNode ast = parser.Parse();
         
-        //3. Code Generator
+        //3. Code Generator (Passa la variabile 'os' al metodo Generate)
         CodeGenerator generator = new CodeGenerator(ast);
-        string asseblyCode = generator.Generate();
+        string asseblyCode = generator.Generate(os);
         
         //4. Saves the generated code file
         string asmPath = $"{baseTempPath}.asm";
@@ -46,7 +58,17 @@ class Program
             Console.WriteLine($"[1/4] File {asmPath} generated.");
         
         //5. Terminal automation: NASM execution
-        ExecuteCommands("nasm", $"-f macho64 {asmPath} -o {objPath}");
+        // Windows : win64
+        // MacOS   : macho64
+        if (os == "win64")
+            ExecuteCommands("nasm", $"-f win64 {asmPath} -o {objPath}");
+        else if(os == "win32")
+            ExecuteCommands("nasm", $"-f win32 {asmPath} -o {objPath}");
+        else if(os == "macho64")
+            ExecuteCommands("nasm", $"-f macho64 {asmPath} -o {objPath}");
+        else
+            throw new Exception("OS not supported");
+        
         if(devMode)
             Console.WriteLine($"[2/4] NASM: Object file {objPath} generated.");
         
@@ -56,9 +78,19 @@ class Program
             Directory.CreateDirectory(exeDir);
         }
         
-        string exePath = Path.Combine(exeDir, fileName);
+        // Aggiunge automaticamente l'estensione .exe se siamo su piattaforma Windows
+        string extension = (os == "win64" || os == "win32") ? ".exe" : "";
+        string exePath = Path.Combine(exeDir, fileName + extension);
 
-        ExecuteCommands("clang", $"-arch x86_64 {objPath} -o {exePath}");
+        // Windows : no -arch x86_64                             -Wl,-subsystem:console
+        // MacOS   : -arch x86_64
+        if(os == "win64" || os == "win32")
+            ExecuteCommands("clang", $"{objPath} -o {exePath} -Wl,-subsystem:console");
+        else if(os == "macho64")
+            ExecuteCommands("clang", $"-arch x86_64 {objPath} -o {exePath}");
+        else
+            throw new Exception("OS not supported");
+        
         if(devMode)
             Console.WriteLine($"[3/4] Clang: Linking completed. Executable {exePath} ready.");
         

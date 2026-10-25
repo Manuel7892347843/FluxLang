@@ -114,3 +114,14 @@ void str_lower(*char s) {
         i = i + 1;
     }
 }
+
+int str_index_of(*char s, char c){
+    int i = 0;
+    while(s[i] != 0){
+        if(s[i] == c){
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
