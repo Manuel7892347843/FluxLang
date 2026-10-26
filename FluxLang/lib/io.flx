@@ -15,29 +15,35 @@ void print_int(int n){
     print(n);
 }
 
-void println(*char s){
+void println_str(*char s){
     print(s);
-    print("\n");
+    println();
+}
+
+void println_bool(bool b, bool format){
+    if(format){
+        print_bool(b);
+    }
+    else{
+        print(b);
+    }
+    println();
 }
 
 void println_int(int n) {
     print(n);
-    print("\n");
+    println();
 }
 
 void println_char(char c) {
     print(c);
-    print("\n");
+    println();
 }
 
 void print_space() {
     print(" ");
 }
 
-void print_bool_str(int b) {
-    if (b != 0) {
-        print("true");
-    } else {
-        print("false");
-    }
+void println(){
+    print("\n");
 }

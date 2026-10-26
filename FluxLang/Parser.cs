@@ -275,6 +275,18 @@ public class Parser
             return expression;
         }
 
+        if (Current.Type == TokenType.True)
+        {
+            Advance();
+            return new BoolLiteralNode(true);
+        }
+        
+        if (Current.Type == TokenType.False)
+        {
+            Advance();
+            return new BoolLiteralNode(false);
+        }
+
         throw new Exception($"Expression not valid: {Current.Value}");
     }
 
@@ -325,6 +337,7 @@ public class Parser
                     
                     if (type == "char") type = "*char";
                     else if (type == "int") type = "*int";
+                    else if (type == "bool") type = "*bool";
                     else if (type == "ptr") type = "*ptr";
                     else if (type == "void") type = "*void";
                 }
@@ -651,7 +664,6 @@ public class Parser
             return new ForNode(initialization, condition, iteration, body);
         }
 
-        // --- NEW: Added Struct Parsing here ---
         if (Current.Type == TokenType.Struct)
         {
             Advance();
@@ -899,7 +911,7 @@ public class Parser
 
     private bool IsTypeToken(TokenType type)
     {
-        return type == TokenType.TypeInt || type == TokenType.TypePtr || type == TokenType.TypeChar || type == TokenType.TypeVoid || type == TokenType.Identifier;
+        return type == TokenType.TypeInt || type == TokenType.TypePtr || type == TokenType.TypeChar || type == TokenType.TypeVoid || type == TokenType.TypeBool || type == TokenType.Identifier;
     }
 
     private Token LookAhead(int distance)

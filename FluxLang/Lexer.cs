@@ -62,6 +62,9 @@ public class Lexer
                     case "void":
                         tokens.Add(new Token(TokenType.TypeVoid, ident));
                         break;
+                    case "bool":
+                        tokens.Add(new Token(TokenType.TypeBool, ident));
+                        break;
                     case "return":
                         tokens.Add(new Token(TokenType.Return, ident));
                         break;
@@ -121,6 +124,12 @@ public class Lexer
                         break;
                     case "struct":
                         tokens.Add(new Token(TokenType.Struct, ident));
+                        break;
+                    case "true":
+                        tokens.Add(new Token(TokenType.True, ident));
+                        break;
+                    case "false":
+                        tokens.Add(new Token(TokenType.False, ident));
                         break;
                     default:
                         tokens.Add(new Token(TokenType.Identifier, ident));

@@ -421,3 +421,13 @@ public class StructAssignNode : AstNode
         Value = value;
     }
 }
+
+public class BoolLiteralNode : AstNode
+{
+    public bool Value { get; }
+
+    public BoolLiteralNode(bool value)
+    {
+        Value = value;
+    }
+}

@@ -6,6 +6,7 @@ public enum TokenType
     TypePtr,            // ptr
     TypeChar,           // char
     TypeVoid,           // void
+    TypeBool,           // bool
     
     Return,             // return
     
@@ -68,6 +69,9 @@ public enum TokenType
     Import,
     
     Struct,
+    
+    True,
+    False,
     
     EOF
 }

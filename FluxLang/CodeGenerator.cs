@@ -116,10 +116,10 @@ public class CodeGenerator
 
         finalAsm.AppendLine("section .data");
         finalAsm.AppendLine("   align 16");
-        finalAsm.AppendLine("   format_num db \"%lld\", 10, 0");
+        finalAsm.AppendLine("   format_num db \"%lld\", 0");
         finalAsm.AppendLine("   format_num_input db \"%lld\", 0");
-        finalAsm.AppendLine("   format_char db \"%c\", 10, 0");
-        finalAsm.AppendLine("   format_str db \"%s\", 10, 0");
+        finalAsm.AppendLine("   format_char db \"%c\", 0");
+        finalAsm.AppendLine("   format_str db \"%s\", 0");
         finalAsm.Append(_asmData.ToString());
         finalAsm.AppendLine();
 
@@ -221,8 +221,6 @@ public class CodeGenerator
         else if (node is VarDeclNode varDecl)
         {
             GenerateExpression(varDecl.Initializer, p);
-            _stackOffset -= 8;
-            _stackMap[varDecl.Name] = _stackOffset;
             
             string type = varDecl.Type;
             if (_structs.ContainsKey(type))
@@ -230,8 +228,19 @@ public class CodeGenerator
                 type = "*" + type;
             }
             
+            int size = GetSizeOfType(type);
+            _stackOffset -= size;
+            _stackMap[varDecl.Name] = _stackOffset;
             _typeMap[varDecl.Name] = type;
-            _asm.AppendLine($"   mov [rbp{_stackOffset}], rax   ; Save the variable '{varDecl.Name}' of type {type}");
+
+            if (size == 1)
+            {
+                _asm.AppendLine($"   mov [rbp{_stackOffset}], al   ; Save the variable '{varDecl.Name}' of type {type}");
+            }
+            else
+            {
+                _asm.AppendLine($"   mov [rbp{_stackOffset}], rax   ; Save the variable '{varDecl.Name}' of type {type}");
+            }
         }
         else if (node is AssignmentNode assignNode)
         {
@@ -826,6 +835,10 @@ public class CodeGenerator
             _asm.AppendLine($"   {setOp} al");
             _asm.AppendLine("   movzx rax, al");
         }
+        else if (node is BoolLiteralNode boolNode)
+        {
+            _asm.AppendLine($"  mov rax, {(boolNode.Value ? 1 : 0)}");
+        }
     }
 
     private void GenerateCondition(AstNode condition, string targetLabel, bool jumpIfFalse, string p)
@@ -905,11 +918,26 @@ public class CodeGenerator
         }
     }
 
+    private int GetSizeOfType(string type)
+    {
+        if (type.StartsWith("*")) return 8;
+        if (type == "int") return 8;
+        if (type == "bool") return 8;
+        if (type == "char") return 1;
+        if (_structs.ContainsKey(type)) return GetStructSize(type);
+        return 8; // Default
+    }
+
     private int GetStructSize(string structName)
     {
         if (_structs.TryGetValue(structName, out var structNode))
         {
-            return structNode.Fields.Count * 8;
+            int size = 0;
+            foreach (var field in structNode.Fields)
+            {
+                size += GetSizeOfType(field.Type);
+            }
+            return size;
         }
         throw new Exception($"Struct '{structName}' not defined");
     }
@@ -925,7 +953,7 @@ public class CodeGenerator
                 {
                     return offset;
                 }
-                offset += 8; // Flux uses 64-bit values for everything currently
+                offset += GetSizeOfType(field.Type);
             }
             throw new Exception($"Field '{fieldName}' not found in struct '{structName}'");
         }

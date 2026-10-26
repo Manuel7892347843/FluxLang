@@ -102,7 +102,7 @@ class Program
         ExecuteNativeExe(exePath);
         
         if(devMode)
-            Console.WriteLine("--------------------------------------------");
+            Console.WriteLine("\n--------------------------------------------");
     }
 
     private static void ExecuteCommands(string command, string arguments)
