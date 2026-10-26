@@ -16,7 +16,6 @@ public class CodeGenerator
     private int _ifCount = 0;
     private string? _currentFunctionName = null;
 
-    // Registri dinamici impostati in base all'OS
     private string[] ParameterRegisters = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 
     private int _whileCount = 0;

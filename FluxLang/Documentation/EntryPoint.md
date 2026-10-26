@@ -6,6 +6,7 @@ Without it, the program will not compile because it will not have a point where 
 
 ```Flux
 void main(){
-    //Your code here
+    print("Hello, World!");
 }
 ```
+Based on your OS, the entry point in the assembly code will change, on Windows it will be `main` and on Mac it will be `_main`.
