@@ -383,3 +383,41 @@ public class PrintExprNode : AstNode
         Expression = expression;
     }
 }
+
+public class StructNode : AstNode
+{
+    public string Name { get; }
+    public List<VarDeclNode> Fields { get; }
+    
+    public StructNode(string name, List<VarDeclNode> fields)
+    {
+        Name = name;
+        Fields = fields;
+    }
+}
+
+public class StructAccessNode : AstNode
+{
+    public AstNode StructPtr { get; }
+    public string FieldName { get; }
+
+    public StructAccessNode(AstNode structPtr, string fieldName)
+    {
+        StructPtr = structPtr;
+        FieldName = fieldName;
+    }
+}
+
+public class StructAssignNode : AstNode
+{
+    public AstNode StructPtr { get; }
+    public string FieldName { get; }
+    public AstNode Value { get; }
+
+    public StructAssignNode(AstNode structPtr, string fieldName, AstNode value)
+    {
+        StructPtr = structPtr;
+        FieldName = fieldName;
+        Value = value;
+    }
+}

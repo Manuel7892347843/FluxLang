@@ -218,6 +218,7 @@ public class Parser
         if (Current.Type == TokenType.Identifier)
         {
             string name = Advance().Value;
+            AstNode node;
             if (Current.Type == TokenType.OpenParenthesis)
             {
                 Match(TokenType.OpenParenthesis, "Missing (");
@@ -232,16 +233,28 @@ public class Parser
                     }
                 }
                 Match(TokenType.CloseParenthesis, "Missing ) after arguments");
-                return new FunctionCallNode(name, arguments);
+                node = new FunctionCallNode(name, arguments);
             }
-            if (Current.Type == TokenType.OpenBracket)
+            else if (Current.Type == TokenType.OpenBracket)
             {
                 Advance();
                 AstNode index = ParseExpression();
                 Match(TokenType.CloseBracket, "Missing ] after array index");
-                return new ArrayAccessNode(name, index);
+                node = new ArrayAccessNode(name, index);
             }
-            return new IdentifierNode(name);
+            else
+            {
+                node = new IdentifierNode(name);
+            }
+
+            // Handle member access: node->field1->field2
+            while (Current.Type == TokenType.Arrow)
+            {
+                Advance();
+                string fieldName = Match(TokenType.Identifier, "Expected field name after ->").Value;
+                node = new StructAccessNode(node, fieldName);
+            }
+            return node;
         }
 
         if (Current.Type == TokenType.StringLiteral)
@@ -316,17 +329,21 @@ public class Parser
                     else if (type == "void") type = "*void";
                 }
 
-                Match(TokenType.Assign, "Expected = after the name of the variable");
-                AstNode initializer = ParseExpression();
-
-                // Automatic type adjustment for char name = "string"
-                if (type == "char" && initializer is StringLiteralNode)
+                AstNode? initializer = null;
+                if (Current.Type == TokenType.Assign)
                 {
-                    type = "*char";
+                    Advance();
+                    initializer = ParseExpression();
+
+                    // Automatic type adjustment for char name = "string"
+                    if (type == "char" && initializer is StringLiteralNode)
+                    {
+                        type = "*char";
+                    }
                 }
 
                 Match(TokenType.Semicolon, "Missing ; at the end of the line");
-                return new VarDeclNode(type, name, initializer);
+                return new VarDeclNode(type, name, initializer ?? new NumberNode(0));
             }
         }
 
@@ -442,8 +459,18 @@ public class Parser
 
         if (Current.Type == TokenType.Identifier)
         {
+            int startPos = _position;
             string name = Advance().Value;
-            if (Current.Type == TokenType.OpenParenthesis)
+            
+            AstNode targetNode = new IdentifierNode(name);
+            while (Current.Type == TokenType.Arrow)
+            {
+                Advance();
+                string fieldName = Match(TokenType.Identifier, "Expected field name after ->").Value;
+                targetNode = new StructAccessNode(targetNode, fieldName);
+            }
+
+            if (Current.Type == TokenType.OpenParenthesis && targetNode is IdentifierNode)
             {
                 Match(TokenType.OpenParenthesis, "Missing (");
                 var arguments = new List<AstNode>();
@@ -466,10 +493,18 @@ public class Parser
                 Advance();
                 AstNode expression = ParseExpression();
                 Match(TokenType.Semicolon, "Missing ; after assignment");
-                return new AssignmentNode(name, expression);
+                
+                if (targetNode is IdentifierNode id)
+                {
+                    return new AssignmentNode(id.Name, expression);
+                }
+                else if (targetNode is StructAccessNode sa)
+                {
+                    return new StructAssignNode(sa.StructPtr, sa.FieldName, expression);
+                }
             }
 
-            if (Current.Type == TokenType.OpenBracket)
+            if (Current.Type == TokenType.OpenBracket && targetNode is IdentifierNode)
             {
                 Advance();
                 AstNode index = ParseExpression();
@@ -480,7 +515,7 @@ public class Parser
                 return new ArrayAssignNode(name, index, value);
             }
             
-            _position--; // Backtrack if it's not a function call, assignment or array assignment
+            _position = startPos; 
         }
 
         if (Current.Type == TokenType.Exit)
@@ -614,6 +649,34 @@ public class Parser
             Match(TokenType.CloseBrace, "Missing } to end the for body");
             
             return new ForNode(initialization, condition, iteration, body);
+        }
+
+        // --- NEW: Added Struct Parsing here ---
+        if (Current.Type == TokenType.Struct)
+        {
+            Advance();
+            string name = Match(TokenType.Identifier, "Expected struct name").Value;
+            Match(TokenType.OpenBrace, "Missing { to start the struct body");
+            var fields = new List<VarDeclNode>();
+            while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+            {
+                var stmt = ParseStatement();
+                if (stmt is VarDeclNode varDecl)
+                {
+                    fields.Add(varDecl);
+                }
+                else if (stmt is DoubleSlashNode)
+                {
+                    // Ignore comments inside struct
+                }
+                else
+                {
+                    throw new Exception("Only variable declarations are allowed inside a struct");
+                }
+            }
+            Match(TokenType.CloseBrace, "Missing } to end the struct body");
+            Match(TokenType.Semicolon, "Missing ; after struct declaration");
+            return new StructNode(name, fields);
         }
         
         throw new Exception($"Unrecognized instruction: {Current.Value}");
@@ -782,7 +845,14 @@ public class Parser
                 return true;
             }
 
-            // Case 2: Type name[size] = ...
+            // Case 2: Type name; (Declaration without initializer)
+            if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
+                pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.Semicolon)
+            {
+                return true;
+            }
+
+            // Case 3: Type name[size] = ...
             if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
                 pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.OpenBracket)
             {
@@ -796,7 +866,7 @@ public class Parser
                     tempPos++;
                 }
                 
-                if (tempPos < _tokens.Count && _tokens[tempPos].Type == TokenType.Assign)
+                if (tempPos < _tokens.Count && (_tokens[tempPos].Type == TokenType.Assign || _tokens[tempPos].Type == TokenType.Semicolon))
                 {
                     return true;
                 }
@@ -829,7 +899,7 @@ public class Parser
 
     private bool IsTypeToken(TokenType type)
     {
-        return type == TokenType.TypeInt || type == TokenType.TypePtr || type == TokenType.TypeChar || type == TokenType.TypeVoid;
+        return type == TokenType.TypeInt || type == TokenType.TypePtr || type == TokenType.TypeChar || type == TokenType.TypeVoid || type == TokenType.Identifier;
     }
 
     private Token LookAhead(int distance)

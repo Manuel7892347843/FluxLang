@@ -119,6 +119,9 @@ public class Lexer
                     case "srand":
                         tokens.Add(new Token(TokenType.Srand, ident));
                         break;
+                    case "struct":
+                        tokens.Add(new Token(TokenType.Struct, ident));
+                        break;
                     default:
                         tokens.Add(new Token(TokenType.Identifier, ident));
                         break;
@@ -262,8 +265,16 @@ public class Lexer
                     tokens.Add(new Token(TokenType.StringLiteral, text));
                     break;
                 case '-':
-                    tokens.Add(new Token(TokenType.Minus, "-"));
                     Advance();
+                    if (Current == '>')
+                    {
+                        tokens.Add(new Token(TokenType.Arrow, "->"));
+                        Advance();
+                    }
+                    else
+                    {
+                        tokens.Add(new Token(TokenType.Minus, "-"));
+                    }
                     break;
                 case '+':
                     tokens.Add(new Token(TokenType.Plus, "+"));

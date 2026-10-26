@@ -62,8 +62,12 @@ public enum TokenType
     InputStr,
     OpenBracket,
     CloseBracket,
+
+    Arrow, // ->
     
     Import,
+    
+    Struct,
     
     EOF
 }

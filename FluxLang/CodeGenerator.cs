@@ -26,6 +26,8 @@ public class CodeGenerator
     private string _p = "";
     private bool _isWindows = false;
 
+    private readonly Dictionary<string, StructNode> _structs = new Dictionary<string, StructNode>();
+
     public CodeGenerator(ProgramNode program)
     {
         _program = program;
@@ -53,6 +55,12 @@ public class CodeGenerator
 
     private string RealGenerate(string os)
     {
+        _structs.Clear();
+        foreach (var stmt in _program.Statements)
+        {
+            if (stmt is StructNode sn) _structs[sn.Name] = sn;
+        }
+
         _asm.Clear();
         _asmData.Clear();
         _asmFunctions.Clear();
@@ -64,6 +72,7 @@ public class CodeGenerator
         _whileCount = 0;
         _doWhileCount = 0;
         _forCount = 0;
+        // _structs.Clear(); // Don't clear here, already cleared at the beginning of RealGenerate
 
         bool hasMain = false;
         foreach (var func in _program.Functions)
@@ -169,8 +178,15 @@ public class CodeGenerator
             var param = func.Parameters[i];
             _stackOffset -= 8;
             _stackMap[param.Name] = _stackOffset;
-            _typeMap[param.Name] = param.Type;
-            _asmFunctions.AppendLine($"   mov [rbp{_stackOffset}], {ParameterRegisters[i]}  ; Store parameter {param.Name}");
+            
+            string type = param.Type;
+            if (_structs.ContainsKey(type))
+            {
+                type = "*" + type;
+            }
+            
+            _typeMap[param.Name] = type;
+            _asmFunctions.AppendLine($"   mov [rbp{_stackOffset}], {ParameterRegisters[i]}  ; Store parameter {param.Name} (type {type})");
         }
 
         var oldAsm = _asm;
@@ -208,8 +224,15 @@ public class CodeGenerator
             GenerateExpression(varDecl.Initializer, p);
             _stackOffset -= 8;
             _stackMap[varDecl.Name] = _stackOffset;
-            _typeMap[varDecl.Name] = varDecl.Type;
-            _asm.AppendLine($"   mov [rbp{_stackOffset}], rax   ; Save the variable '{varDecl.Name}' of type {varDecl.Type}");
+            
+            string type = varDecl.Type;
+            if (_structs.ContainsKey(type))
+            {
+                type = "*" + type;
+            }
+            
+            _typeMap[varDecl.Name] = type;
+            _asm.AppendLine($"   mov [rbp{_stackOffset}], rax   ; Save the variable '{varDecl.Name}' of type {type}");
         }
         else if (node is AssignmentNode assignNode)
         {
@@ -323,28 +346,18 @@ public class CodeGenerator
             string r2 = _isWindows ? "rdx" : "rsi";
             _asm.AppendLine($"   mov {r2}, rax");
             string format = "format_num";
-            if (printExpr.Expression is ArrayAccessNode aa)
+            
+            string? exprType = GetExpressionType(printExpr.Expression);
+            if (exprType != null)
             {
-                if (_typeMap.TryGetValue(aa.ArrayName, out string? t) && (t.Contains("*char") || t == "char"))
-                    format = "format_char";
-            }
-            else if (printExpr.Expression is DerefExpressionNode derefExpr)
-            {
-                if (_typeMap.TryGetValue(derefExpr.PointerName, out string? t) && (t.Contains("*char") || t == "char"))
-                    format = "format_char";
-            }
-            else if (printExpr.Expression is IdentifierNode id)
-            {
-                if (_typeMap.TryGetValue(id.Name, out string? t))
-                {
-                    if (t == "char") format = "format_char";
-                    else if (t.Contains("*char")) format = "format_str";
-                }
+                if (exprType == "char") format = "format_char";
+                else if (exprType.Contains("*char")) format = "format_str";
             }
             else if (printExpr.Expression is StringLiteralNode)
             {
                 format = "format_str";
             }
+            
             _asm.AppendLine($"   lea {r1}, [rel {format}]");
             _asm.AppendLine("   mov al, 0");
             _asm.AppendLine($"   call {p}printf");
@@ -431,6 +444,23 @@ public class CodeGenerator
                 throw new Exception($"Array '{arrayAssign.ArrayName}' not defined");
             }
         }
+        else if (node is StructAssignNode structAssign)
+        {
+            GenerateExpression(structAssign.Value, p);
+            _asm.AppendLine("   push rax        ; Save value to assign to struct field");
+
+            GenerateExpression(structAssign.StructPtr, p);
+            _asm.AppendLine("   mov rdx, rax    ; RDX = struct base pointer");
+            
+            string? structType = GetExpressionType(structAssign.StructPtr);
+            if (structType == null) throw new Exception("Could not determine struct type");
+            
+            string structName = structType.TrimStart('*');
+            int offset = GetFieldOffset(structName, structAssign.FieldName);
+            
+            _asm.AppendLine("   pop rax         ; RAX = value to assign");
+            _asm.AppendLine($"   mov [rdx + {offset}], rax ; Assign value to field {structAssign.FieldName} at offset {offset}");
+        }
         else if (node is ExitNode exitNode)
         {
             GenerateExpression(exitNode.ExitCode, p);
@@ -502,6 +532,10 @@ public class CodeGenerator
             }
             _asm.AppendLine($"   jmp {labelStart}");
             _asm.AppendLine($"{labelEnd}:");
+        }
+        else if (node is StructNode structNode)
+        {
+            _structs[structNode.Name] = structNode;
         }
     }
 
@@ -624,9 +658,30 @@ public class CodeGenerator
                 throw new Exception($"Array '{arrayAccess.ArrayName}' not defined");
             }
         }
+        else if (node is StructAccessNode structAccess)
+        {
+            GenerateExpression(structAccess.StructPtr, p);
+            _asm.AppendLine("   mov rdx, rax    ; RDX = struct base pointer");
+            
+            string? structType = GetExpressionType(structAccess.StructPtr);
+            if (structType == null) throw new Exception("Could not determine struct type");
+            
+            string structName = structType.TrimStart('*');
+            int offset = GetFieldOffset(structName, structAccess.FieldName);
+            
+            _asm.AppendLine($"   mov rax, [rdx + {offset}] ; Access field {structAccess.FieldName} at offset {offset}");
+        }
         else if (node is AllocNode allocNode)
         {
-            GenerateExpression(allocNode.Size, p);
+            if (allocNode.Size is IdentifierNode id && _structs.ContainsKey(id.Name))
+            {
+                int size = GetStructSize(id.Name);
+                _asm.AppendLine($"   mov rax, {size}");
+            }
+            else
+            {
+                GenerateExpression(allocNode.Size, p);
+            }
             string targetReg = _isWindows ? "rcx" : "rdi";
             _asm.AppendLine($"   mov {targetReg}, rax");
             _asm.AppendLine($"   call {p}malloc");
@@ -851,12 +906,52 @@ public class CodeGenerator
         }
     }
 
+    private int GetStructSize(string structName)
+    {
+        if (_structs.TryGetValue(structName, out var structNode))
+        {
+            return structNode.Fields.Count * 8;
+        }
+        throw new Exception($"Struct '{structName}' not defined");
+    }
+
+    private int GetFieldOffset(string structName, string fieldName)
+    {
+        if (_structs.TryGetValue(structName, out var structNode))
+        {
+            int offset = 0;
+            foreach (var field in structNode.Fields)
+            {
+                if (field.Name == fieldName)
+                {
+                    return offset;
+                }
+                offset += 8; // Flux uses 64-bit values for everything currently
+            }
+            throw new Exception($"Field '{fieldName}' not found in struct '{structName}'");
+        }
+        throw new Exception($"Struct '{structName}' not defined");
+    }
+
     private string? GetExpressionType(AstNode node)
     {
         if (node is IdentifierNode id)
         {
             _typeMap.TryGetValue(id.Name, out string? type);
             return type;
+        }
+        if (node is StructAccessNode sa)
+        {
+            string? structType = GetExpressionType(sa.StructPtr);
+            if (structType != null)
+            {
+                string structName = structType.TrimStart('*');
+                if (_structs.TryGetValue(structName, out var structNode))
+                {
+                    var field = structNode.Fields.Find(f => f.Name == sa.FieldName);
+                    return field?.Type;
+                }
+            }
         }
         if (node is ArrayAccessNode aa)
         {
