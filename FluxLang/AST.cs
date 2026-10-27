@@ -70,6 +70,10 @@ public class VarDeclNode : AstNode
     public string Type { get; set; }
     public string Name { get; set; }
     public AstNode Initializer { get; set; }
+    // Dimensione array statico (0 se non è un array)
+    public int StaticArraySize { get; set; } = 0;
+    // Lista di inizializzatori per array letterali
+    public List<AstNode>? ArrayInitializers { get; set; }
 
     public VarDeclNode(string type, string name, AstNode initializer)
     {
@@ -105,6 +109,18 @@ public class NumberNode : AstNode
     public NumberNode(int value)
     {
         Value = value;
+    }
+}
+
+public class FloatLiteralNode : AstNode
+{
+    public double Value { get; }
+    public bool IsFloat { get; } // true=float, false=double
+
+    public FloatLiteralNode(double value, bool isFloat = false)
+    {
+        Value = value;
+        IsFloat = isFloat;
     }
 }
 
@@ -151,6 +167,15 @@ public class DerefExpressionNode : AstNode
     }
 }
 
+public class AddressOfNode : AstNode
+{
+    public string VarName { get; }
+    public AddressOfNode(string varName)
+    {
+        VarName = varName;
+    }
+}
+
 public class PrintStrNode : AstNode
 {
     public string Text { get; }
@@ -184,6 +209,21 @@ public class UnaryOpNode : AstNode
     }
 }
 
+// Operatori ++ / -- (pre e post incremento)
+public class IncrementNode : AstNode
+{
+    public string VarName { get; }
+    public bool IsIncrement { get; } // true = ++, false = --
+    public bool IsPrefix { get; }
+
+    public IncrementNode(string varName, bool isIncrement, bool isPrefix)
+    {
+        VarName = varName;
+        IsIncrement = isIncrement;
+        IsPrefix = isPrefix;
+    }
+}
+
 public class ComparisonNode : AstNode
 {
     public AstNode Left { get; }
@@ -210,6 +250,33 @@ public class IfStatementNode : AstNode
         ElseBody = elseBody;
     }
 }
+
+public class SwitchCaseNode : AstNode
+{
+    public AstNode? CaseValue { get; } // null = default
+    public List<AstNode> Body { get; }
+
+    public SwitchCaseNode(AstNode? caseValue, List<AstNode> body)
+    {
+        CaseValue = caseValue;
+        Body = body;
+    }
+}
+
+public class SwitchNode : AstNode
+{
+    public AstNode Expression { get; }
+    public List<SwitchCaseNode> Cases { get; }
+
+    public SwitchNode(AstNode expression, List<SwitchCaseNode> cases)
+    {
+        Expression = expression;
+        Cases = cases;
+    }
+}
+
+public class BreakNode : AstNode { }
+public class ContinueNode : AstNode { }
 
 public class CharacterNode : AstNode
 {
@@ -270,6 +337,8 @@ public class AssignmentNode : AstNode
 {
     public string Name { get; }
     public AstNode Expression { get; }
+    public string? CompoundOp { get; set; } // +=, -=, *=, /= (null = semplice =)
+
     public AssignmentNode(string name, AstNode expression)
     {
         Name = name;
@@ -429,5 +498,29 @@ public class BoolLiteralNode : AstNode
     public BoolLiteralNode(bool value)
     {
         Value = value;
+    }
+}
+
+public class TypedefNode : AstNode
+{
+    public string OldType { get; }
+    public string NewType { get; }
+
+    public TypedefNode(string oldType, string newType)
+    {
+        OldType = oldType;
+        NewType = newType;
+    }
+}
+
+public class EnumNode : AstNode
+{
+    public string Name { get; }
+    public List<(string MemberName, int Value)> Members { get; }
+
+    public EnumNode(string name, List<(string, int)> members)
+    {
+        Name = name;
+        Members = members;
     }
 }

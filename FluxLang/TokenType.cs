@@ -7,6 +7,12 @@ public enum TokenType
     TypeChar,           // char
     TypeVoid,           // void
     TypeBool,           // bool
+    TypeFloat,          // float
+    TypeDouble,         // double
+    TypeShort,          // short
+    TypeLong,           // long
+    TypeByte,           // byte
+    TypeUint8,          // uint8
     
     Return,             // return
     
@@ -37,16 +43,22 @@ public enum TokenType
     LessEqual,
     GreaterEqual,
     
-    And,
-    Or,
-    Not,
+    And,        // &&
+    Or,         // ||
+    Not,        // !
     
     While,
     For,
     Do,
+    Switch,
+    Case,
+    Default,
+    Break,
+    Continue,
     
     Identifier,
     Number,
+    FloatLiteral,
     OpenParenthesis,
     CloseParenthesis,
     Assign,
@@ -69,9 +81,34 @@ public enum TokenType
     Import,
     
     Struct,
+    Typedef,
+    Enum,
     
     True,
     False,
+    
+    // Bitwise Operators
+    BitAnd,     // &
+    BitOr,      // |
+    BitXor,     // ^
+    BitNot,     // ~
+    ShiftLeft,  // <<
+    ShiftRight, // >>
+    
+    // Composite Operators
+    PlusAssign,     // +=
+    MinusAssign,    // -=
+    StarAssign,     // *=
+    SlashAssign,    // /=
+    
+    // Increment/decrement
+    PlusPlus,       // ++
+    MinusMinus,     // --
+    
+    // Address-of
+    Ampersand,      // &
+    
+    Colon,          // :
     
     EOF
 }

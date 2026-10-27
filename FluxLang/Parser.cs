@@ -9,6 +9,8 @@ public class Parser
     private int _position = 0;
     private readonly string _currentFilePath;
     private static readonly HashSet<string> _importedFiles = new HashSet<string>();
+    private readonly Dictionary<string, string> _typedefs = new Dictionary<string, string>();
+    private readonly Dictionary<string, int> _enumConstants = new Dictionary<string, int>();
 
     public Parser(List<Token> tokens, string currentFilePath = "")
     {
@@ -37,6 +39,18 @@ public class Parser
         throw new Exception($"{errorMessage}. Find insted: {Current}");
     }
 
+    private string ResolveTypeName(string name)
+    {
+        string result = name;
+        int safety = 0;
+        while (_typedefs.TryGetValue(result, out var mapped) && safety < 100)
+        {
+            result = mapped;
+            safety++;
+        }
+        return result;
+    }
+
     private AstNode ParseComment()
     {
         if (Current.Type == TokenType.SlashSlash)
@@ -49,7 +63,43 @@ public class Parser
 
     private AstNode ParseExpression()
     {
-        return ParseLogicalOr();
+        return ParseBitwiseOr();
+    }
+
+    private AstNode ParseBitwiseOr()
+    {
+        AstNode left = ParseBitwiseXor();
+        while (Current.Type == TokenType.BitOr)
+        {
+            string op = Advance().Value;
+            AstNode right = ParseBitwiseXor();
+            left = new BinaryOpNode(left, op, right);
+        }
+        return left;
+    }
+
+    private AstNode ParseBitwiseXor()
+    {
+        AstNode left = ParseBitwiseAnd();
+        while (Current.Type == TokenType.BitXor)
+        {
+            string op = Advance().Value;
+            AstNode right = ParseBitwiseAnd();
+            left = new BinaryOpNode(left, op, right);
+        }
+        return left;
+    }
+
+    private AstNode ParseBitwiseAnd()
+    {
+        AstNode left = ParseLogicalOr();
+        while (Current.Type == TokenType.Ampersand)
+        {
+            string op = Advance().Value;
+            AstNode right = ParseLogicalOr();
+            left = new BinaryOpNode(left, op, right);
+        }
+        return left;
     }
 
     private AstNode ParseLogicalOr()
@@ -66,8 +116,20 @@ public class Parser
 
     private AstNode ParseLogicalAnd()
     {
-        AstNode left = ParseComparisonExpr();
+        AstNode left = ParseShift();
         while (Current.Type == TokenType.And)
+        {
+            string op = Advance().Value;
+            AstNode right = ParseShift();
+            left = new BinaryOpNode(left, op, right);
+        }
+        return left;
+    }
+
+    private AstNode ParseShift()
+    {
+        AstNode left = ParseComparisonExpr();
+        while (Current.Type == TokenType.ShiftLeft || Current.Type == TokenType.ShiftRight)
         {
             string op = Advance().Value;
             AstNode right = ParseComparisonExpr();
@@ -121,6 +183,28 @@ public class Parser
 
     private AstNode ParseUnary()
     {
+        if (Current.Type == TokenType.Ampersand)
+        {
+            Advance();
+            string varName = Match(TokenType.Identifier, "Expected variable name after &").Value;
+            return new AddressOfNode(varName);
+        }
+
+        if (Current.Type == TokenType.BitNot)
+        {
+            string op = Advance().Value;
+            AstNode right = ParseUnary();
+            return new UnaryOpNode(op, right);
+        }
+
+        if (Current.Type == TokenType.PlusPlus || Current.Type == TokenType.MinusMinus)
+        {
+            bool isInc = Current.Type == TokenType.PlusPlus;
+            Advance();
+            string varName = Match(TokenType.Identifier, "Expected variable after ++/--").Value;
+            return new IncrementNode(varName, isInc, true);
+        }
+
         if (Current.Type == TokenType.Minus || Current.Type == TokenType.Not)
         {
             string op = Advance().Value;
@@ -215,9 +299,32 @@ public class Parser
             return new NumberNode(int.Parse(Advance().Value));
         }
 
+        if (Current.Type == TokenType.FloatLiteral)
+        {
+            string raw = Advance().Value;
+            bool isFloat = raw.EndsWith("f") || raw.EndsWith("F");
+            if (isFloat) raw = raw.Substring(0, raw.Length - 1);
+            double val = double.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+            return new FloatLiteralNode(val, isFloat);
+        }
+
         if (Current.Type == TokenType.Identifier)
         {
             string name = Advance().Value;
+
+            if (Current.Type == TokenType.PlusPlus || Current.Type == TokenType.MinusMinus)
+            {
+                bool isInc = Current.Type == TokenType.PlusPlus;
+                Advance();
+                return new IncrementNode(name, isInc, false);
+            }
+
+            if (_enumConstants.TryGetValue(name, out int enumVal))
+            {
+                if (Current.Type != TokenType.OpenParenthesis && Current.Type != TokenType.OpenBracket && Current.Type != TokenType.Arrow)
+                    return new NumberNode(enumVal);
+            }
+
             AstNode node;
             if (Current.Type == TokenType.OpenParenthesis)
             {
@@ -247,7 +354,6 @@ public class Parser
                 node = new IdentifierNode(name);
             }
 
-            // Handle member access: node->field1->field2
             while (Current.Type == TokenType.Arrow)
             {
                 Advance();
@@ -301,12 +407,41 @@ public class Parser
         if (IsTypeToken(Current.Type))
         {
             type += Advance().Value;
+            if (type == Current.Value || !type.StartsWith("*"))
+            {
+                // If it's an identifier, try to resolve it as a typedef
+            }
         }
         else
         {
             throw new Exception($"Expected type. Found instead: {Current}");
         }
         return type;
+    }
+
+    private string ParseTypeResolved()
+    {
+        int ptrCount = 0;
+        while (Current.Type == TokenType.Asterisk)
+        {
+            ptrCount++;
+            Advance();
+        }
+
+        string baseName;
+        if (IsTypeToken(Current.Type))
+        {
+            baseName = Advance().Value;
+        }
+        else
+        {
+            throw new Exception($"Expected type. Found instead: {Current}");
+        }
+
+        // Risolve typedefs
+        baseName = ResolveTypeName(baseName);
+
+        return new string('*', ptrCount) + baseName;
     }
 
     private AstNode ParseStatement()
@@ -316,47 +451,132 @@ public class Parser
             return ParseComment();
         }
 
+        // typedef old new ;
+        if (Current.Type == TokenType.Typedef)
+        {
+            Advance();
+            string oldType = ParseTypeResolved();
+            string newType = Match(TokenType.Identifier, "Expected new type name after typedef").Value;
+            Match(TokenType.Semicolon, "Missing ; after typedef");
+            _typedefs[newType] = oldType;
+            return new TypedefNode(oldType, newType);
+        }
+
+        // enum Nome { A, B = 3, C };
+        if (Current.Type == TokenType.Enum)
+        {
+            Advance();
+            string enumName = "";
+            if (Current.Type == TokenType.Identifier)
+                enumName = Advance().Value;
+            Match(TokenType.OpenBrace, "Missing { after enum");
+            var members = new List<(string, int)>();
+            int currentValue = 0;
+            while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+            {
+                string memberName = Match(TokenType.Identifier, "Expected enum member name").Value;
+                if (Current.Type == TokenType.Assign)
+                {
+                    Advance();
+                    var valNode = ParseExpression();
+                    if (valNode is NumberNode nn)
+                        currentValue = nn.Value;
+                }
+                members.Add((memberName, currentValue));
+                _enumConstants[memberName] = currentValue;
+                currentValue++;
+                if (Current.Type == TokenType.Comma)
+                    Advance();
+            }
+            Match(TokenType.CloseBrace, "Missing } after enum body");
+            Match(TokenType.Semicolon, "Missing ; after enum");
+            return new EnumNode(enumName, members);
+        }
+
+        if (Current.Type == TokenType.Break)
+        {
+            Advance();
+            Match(TokenType.Semicolon, "Missing ; after break");
+            return new BreakNode();
+        }
+
+        if (Current.Type == TokenType.Continue)
+        {
+            Advance();
+            Match(TokenType.Semicolon, "Missing ; after continue");
+            return new ContinueNode();
+        }
+
         if (IsTypeStartToken(Current.Type))
         {
             if (IsVariableDeclaration())
             {
-                string type = ParseType();
+                string type = ParseTypeResolved();
                 
                 string name = Match(TokenType.Identifier, "Expected the name of the variable").Value;
-                
-                // Check for char var[size] = ... or int var[size] = ...
+
+                int staticArraySize = 0;
+                List<AstNode>? arrayInits = null;
+
+                // Dichiarazione array: type name[size]
                 if (Current.Type == TokenType.OpenBracket)
                 {
                     Advance();
-                    AstNode? size = null;
+                    AstNode? sizeExpr = null;
                     if (Current.Type != TokenType.CloseBracket)
                     {
-                        size = ParseExpression();
+                        sizeExpr = ParseExpression();
                     }
                     Match(TokenType.CloseBracket, "Expected ] after array index in declaration");
-                    
-                    if (type == "char") type = "*char";
-                    else if (type == "int") type = "*int";
-                    else if (type == "bool") type = "*bool";
-                    else if (type == "ptr") type = "*ptr";
-                    else if (type == "void") type = "*void";
+
+                    if (sizeExpr is NumberNode sizeNum)
+                        staticArraySize = sizeNum.Value;
+                    else
+                        staticArraySize = 1; // fallback
+
+                    if (!type.StartsWith("*"))
+                        type = "*" + type;
                 }
 
                 AstNode? initializer = null;
                 if (Current.Type == TokenType.Assign)
                 {
                     Advance();
-                    initializer = ParseExpression();
-
-                    // Automatic type adjustment for char name = "string"
-                    if (type == "char" && initializer is StringLiteralNode)
+                    if (Current.Type == TokenType.OpenBrace)
                     {
-                        type = "*char";
+                        Advance();
+                        arrayInits = new List<AstNode>();
+                        if (Current.Type != TokenType.CloseBrace)
+                        {
+                            arrayInits.Add(ParseExpression());
+                            while (Current.Type == TokenType.Comma)
+                            {
+                                Advance();
+                                if (Current.Type == TokenType.CloseBrace) break;
+                                arrayInits.Add(ParseExpression());
+                            }
+                        }
+                        Match(TokenType.CloseBrace, "Missing } after array initializer");
+                        if (staticArraySize == 0) staticArraySize = arrayInits.Count;
+                        if (!type.StartsWith("*")) type = "*" + type;
+                        initializer = new NumberNode(0); // placeholder
+                    }
+                    else
+                    {
+                        initializer = ParseExpression();
+
+                        if (type == "char" && initializer is StringLiteralNode)
+                        {
+                            type = "*char";
+                        }
                     }
                 }
 
                 Match(TokenType.Semicolon, "Missing ; at the end of the line");
-                return new VarDeclNode(type, name, initializer ?? new NumberNode(0));
+                var node = new VarDeclNode(type, name, initializer ?? new NumberNode(0));
+                node.StaticArraySize = staticArraySize;
+                node.ArrayInitializers = arrayInits;
+                return node;
             }
         }
 
@@ -457,6 +677,49 @@ public class Parser
             }
             return new IfStatementNode(condition, body, elseBody);
         }
+
+        if (Current.Type == TokenType.Switch)
+        {
+            Advance();
+            Match(TokenType.OpenParenthesis, "Missing ( after switch");
+            AstNode expr = ParseExpression();
+            Match(TokenType.CloseParenthesis, "Missing ) after switch expression");
+            Match(TokenType.OpenBrace, "Missing { after switch");
+
+            var cases = new List<SwitchCaseNode>();
+            while (Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+            {
+                if (Current.Type == TokenType.Case)
+                {
+                    Advance();
+                    AstNode caseVal = ParseExpression();
+                    Match(TokenType.Colon, "Missing : after case value");
+                    var caseBody = new List<AstNode>();
+                    while (Current.Type != TokenType.Case && Current.Type != TokenType.Default && Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+                    {
+                        caseBody.Add(ParseStatement());
+                    }
+                    cases.Add(new SwitchCaseNode(caseVal, caseBody));
+                }
+                else if (Current.Type == TokenType.Default)
+                {
+                    Advance();
+                    Match(TokenType.Colon, "Missing : after default");
+                    var defBody = new List<AstNode>();
+                    while (Current.Type != TokenType.Case && Current.Type != TokenType.Default && Current.Type != TokenType.CloseBrace && Current.Type != TokenType.EOF)
+                    {
+                        defBody.Add(ParseStatement());
+                    }
+                    cases.Add(new SwitchCaseNode(null, defBody));
+                }
+                else
+                {
+                    throw new Exception($"Unexpected token in switch: {Current}");
+                }
+            }
+            Match(TokenType.CloseBrace, "Missing } after switch");
+            return new SwitchNode(expr, cases);
+        }
         
         if (Current.Type == TokenType.Return)
         {
@@ -501,15 +764,22 @@ public class Parser
                 return new FunctionCallNode(name, arguments);
             }
             
-            if (Current.Type == TokenType.Assign)
+            if (Current.Type == TokenType.Assign || Current.Type == TokenType.PlusAssign ||
+                Current.Type == TokenType.MinusAssign || Current.Type == TokenType.StarAssign ||
+                Current.Type == TokenType.SlashAssign)
             {
+                string? compoundOp = null;
+                if (Current.Type != TokenType.Assign)
+                    compoundOp = Current.Value;
                 Advance();
                 AstNode expression = ParseExpression();
                 Match(TokenType.Semicolon, "Missing ; after assignment");
                 
                 if (targetNode is IdentifierNode id)
                 {
-                    return new AssignmentNode(id.Name, expression);
+                    var assignNode = new AssignmentNode(id.Name, expression);
+                    assignNode.CompoundOp = compoundOp;
+                    return assignNode;
                 }
                 else if (targetNode is StructAccessNode sa)
                 {
@@ -612,28 +882,18 @@ public class Parser
             AstNode? initialization = null;
             if (Current.Type != TokenType.Semicolon)
             {
-                // In C, for init can be a declaration or an expression.
-                // Our ParseStatement handles declarations and assignments, but it consumes the semicolon.
-                // We need something slightly different here or adjust ParseStatement.
-                // Let's try to parse a statement but without the semicolon requirement if possible, 
-                // OR just use ParseStatement and handle it.
-                // However, ParseStatement expects a semicolon at the end for most things.
-                
-                // Let's check if it's a declaration.
                 if (IsTypeStartToken(Current.Type))
                 {
-                    // This is tricky because ParseStatement will consume the semicolon.
                     initialization = ParseStatement();
                 }
                 else
                 {
-                    // It might be an assignment or expression.
                     initialization = ParseStatement();
                 }
             }
             else
             {
-                Advance(); // Skip semicolon
+                Advance();
             }
 
             AstNode? condition = null;
@@ -646,9 +906,6 @@ public class Parser
             AstNode? iteration = null;
             if (Current.Type != TokenType.CloseParenthesis)
             {
-                // Iteration is usually an assignment or function call, without semicolon.
-                // We need to be careful here. 
-                // Let's implement a small ParseForIteration to avoid semicolon issue.
                 iteration = ParseForIteration();
             }
             Match(TokenType.CloseParenthesis, "Missing ) after for iteration");
@@ -677,9 +934,9 @@ public class Parser
                 {
                     fields.Add(varDecl);
                 }
-                else if (stmt is DoubleSlashNode)
+                else if (stmt is DoubleSlashNode || stmt is TypedefNode || stmt is EnumNode)
                 {
-                    // Ignore comments inside struct
+                    // Ignore
                 }
                 else
                 {
@@ -696,10 +953,18 @@ public class Parser
 
     private AstNode ParseForIteration()
     {
-        // Similar to ParseStatement but without Semicolon
         if (Current.Type == TokenType.Identifier)
         {
             string name = Advance().Value;
+
+            // post-inc/dec (es. i++)
+            if (Current.Type == TokenType.PlusPlus || Current.Type == TokenType.MinusMinus)
+            {
+                bool isInc = Current.Type == TokenType.PlusPlus;
+                Advance();
+                return new IncrementNode(name, isInc, false);
+            }
+
             if (Current.Type == TokenType.OpenParenthesis)
             {
                 Match(TokenType.OpenParenthesis, "Missing (");
@@ -717,11 +982,18 @@ public class Parser
                 return new FunctionCallNode(name, arguments);
             }
             
-            if (Current.Type == TokenType.Assign)
+            if (Current.Type == TokenType.Assign || Current.Type == TokenType.PlusAssign ||
+                Current.Type == TokenType.MinusAssign || Current.Type == TokenType.StarAssign ||
+                Current.Type == TokenType.SlashAssign)
             {
+                string? compoundOp = null;
+                if (Current.Type != TokenType.Assign)
+                    compoundOp = Current.Value;
                 Advance();
                 AstNode expression = ParseExpression();
-                return new AssignmentNode(name, expression);
+                var assign = new AssignmentNode(name, expression);
+                assign.CompoundOp = compoundOp;
+                return assign;
             }
 
             if (Current.Type == TokenType.OpenBracket)
@@ -741,19 +1013,19 @@ public class Parser
 
     private FunctionDeclNode ParseFunction()
     {
-        string returnType = ParseType();
+        string returnType = ParseTypeResolved();
         string name = Match(TokenType.Identifier, "Expected function name").Value;
         Match(TokenType.OpenParenthesis, "Expected ( after function name");
         var parameters = new List<ParameterNode>();
         if (Current.Type != TokenType.CloseParenthesis)
         {
-            string pType = ParseType();
+            string pType = ParseTypeResolved();
             string pName = Match(TokenType.Identifier, "Expected parameter name").Value;
             parameters.Add(new ParameterNode(pType, pName));
             while (Current.Type == TokenType.Comma)
             {
                 Advance();
-                string nextPType = ParseType();
+                string nextPType = ParseTypeResolved();
                 string nextPName = Match(TokenType.Identifier, "Expected parameter name").Value;
                 parameters.Add(new ParameterNode(nextPType, nextPName));
             }
@@ -806,6 +1078,9 @@ public class Parser
                         Lexer importedLexer = new Lexer(importedCode);
                         List<Token> importedTokens = importedLexer.Tokenize();
                         Parser importedParser = new Parser(importedTokens, fullPath);
+                        // Trasferisce typedef ed enum dal parser importato
+                        foreach (var kv in importedParser._typedefs) _typedefs[kv.Key] = kv.Value;
+                        foreach (var kv in importedParser._enumConstants) _enumConstants[kv.Key] = kv.Value;
                         ProgramNode importedAst = importedParser.Parse();
 
                         program.Functions.AddRange(importedAst.Functions);
@@ -830,17 +1105,6 @@ public class Parser
         return program;
     }
 
-    private bool SkipType()
-    {
-        int p = _position;
-        while (p < _tokens.Count && _tokens[p].Type == TokenType.Asterisk) p++;
-        if (p < _tokens.Count && IsTypeToken(_tokens[p].Type))
-        {
-            return true;
-        }
-        return false;
-    }
-
     private bool IsVariableDeclaration()
     {
         int pos = _position;
@@ -850,26 +1114,22 @@ public class Parser
         {
             pos++;
             
-            // Case 1: Type name = ...
             if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
                 pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.Assign)
             {
                 return true;
             }
 
-            // Case 2: Type name; (Declaration without initializer)
             if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
                 pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.Semicolon)
             {
                 return true;
             }
 
-            // Case 3: Type name[size] = ...
             if (pos < _tokens.Count && _tokens[pos].Type == TokenType.Identifier && 
                 pos + 1 < _tokens.Count && _tokens[pos + 1].Type == TokenType.OpenBracket)
             {
                 int tempPos = pos + 2;
-                // Skip expression inside brackets
                 int bracketCount = 1;
                 while (tempPos < _tokens.Count && bracketCount > 0)
                 {
@@ -911,7 +1171,12 @@ public class Parser
 
     private bool IsTypeToken(TokenType type)
     {
-        return type == TokenType.TypeInt || type == TokenType.TypePtr || type == TokenType.TypeChar || type == TokenType.TypeVoid || type == TokenType.TypeBool || type == TokenType.Identifier;
+        return type == TokenType.TypeInt || type == TokenType.TypePtr || 
+               type == TokenType.TypeChar || type == TokenType.TypeVoid || 
+               type == TokenType.TypeBool || type == TokenType.TypeFloat ||
+               type == TokenType.TypeDouble || type == TokenType.TypeShort ||
+               type == TokenType.TypeLong || type == TokenType.TypeByte ||
+               type == TokenType.TypeUint8 || type == TokenType.Identifier;
     }
 
     private Token LookAhead(int distance)
