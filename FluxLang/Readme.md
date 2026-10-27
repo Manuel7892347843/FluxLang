@@ -71,4 +71,4 @@ Command-line flags:
 | `-dev <bool>` | Verbose progress output (`true` / `false`) | `false` |
 
 ## Documentation
-Full documentation is available in the official [Docs](https://fluxlang-website.lyvexstudio.workers.dev/)
+Full documentation is available in the official [Docs](https://fluxlang.lyvexstudio.com)
