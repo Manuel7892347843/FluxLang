@@ -124,20 +124,20 @@ See the individual guides for detailed explanations and examples.
 
 All additional Markdown guides are stored in [`Docs/`](Docs/).
 
-- [Getting Started](Docs/Getting-Started.md)
-- [Language Fundamentals](Docs/Language-Fundamentals.md)
-- [Types and Variables](Docs/Types-and-Variables.md)
-- [Operators and Expressions](Docs/Operators-and-Expressions.md)
-- [Control Flow](Docs/Control-Flow.md)
-- [Functions](Docs/Functions.md)
-- [Arrays and Strings](Docs/Arrays-and-Strings.md)
-- [Structures, Typedefs, and Enums](Docs/Structures-Typedefs-and-Enums.md)
-- [Pointers and Memory](Docs/Pointers-and-Memory.md)
-- [Modules and Libraries](Docs/Modules-and-Libraries.md)
-- [Input and Output](Docs/Input-and-Output.md)
-- [Errors and Exceptions](Docs/Errors-and-Exceptions.md)
-- [Built-in Functions](Docs/Built-in-Functions.md)
-- [Compiler and Troubleshooting](Docs/Compiler-and-Troubleshooting.md)
+- [Getting Started](Flux-Documentation/Docs/Getting-Started.md)
+- [Language Fundamentals](Flux-Documentation/Docs/Language-Fundamentals.md)
+- [Types and Variables](Flux-Documentation/Docs/Types-and-Variables.md)
+- [Operators and Expressions](Flux-Documentation/Docs/Operators-and-Expressions.md)
+- [Control Flow](Flux-Documentation/Docs/Control-Flow.md)
+- [Functions](Flux-Documentation/Docs/Functions.md)
+- [Arrays and Strings](Flux-Documentation/Docs/Arrays-and-Strings.md)
+- [Structures, Typedefs, and Enums](Flux-Documentation/Docs/Structures-Typedefs-and-Enums.md)
+- [Pointers and Memory](Flux-Documentation/Docs/Pointers-and-Memory.md)
+- [Modules and Libraries](Flux-Documentation/Docs/Modules-and-Libraries.md)
+- [Input and Output](Flux-Documentation/Docs/Input-and-Output.md)
+- [Errors and Exceptions](Flux-Documentation/Docs/Errors-and-Exceptions.md)
+- [Built-in Functions](Flux-Documentation/Docs/Built-in-Functions.md)
+- [Compiler and Troubleshooting](Flux-Documentation/Docs/Compiler-and-Troubleshooting.md)
 
 ## Compiler pipeline
 
