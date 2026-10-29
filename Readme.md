@@ -122,7 +122,7 @@ See the individual guides for detailed explanations and examples.
 
 ## Documentation
 
-All additional Markdown guides are stored in [`Docs/`](Docs/).
+All additional Markdown guides are stored in [`Docs/`](Flux-Documentation/Docs/).
 
 - [Getting Started](Flux-Documentation/Docs/Getting-Started.md)
 - [Language Fundamentals](Flux-Documentation/Docs/Language-Fundamentals.md)
