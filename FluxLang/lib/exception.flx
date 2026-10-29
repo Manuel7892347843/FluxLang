@@ -1,0 +1,31 @@
+﻿enum ErrorCode {
+    // Success
+    E_OK = 0,
+
+    // Generic errors (errno style)
+    E_PERM       = 1,    // Operation not permitted
+    E_NOENT      = 2,    // No such file or directory
+    E_IO         = 5,    // I/O error
+    E_NOMEM      = 12,   // Out of memory
+    E_ACCES      = 13,   // Permission denied
+    E_FAULT      = 14,   // Bad address (invalid pointer)
+    E_BUSY       = 16,   // Device or resource busy
+    E_EXIST      = 17,   // File exists
+    E_INVAL      = 22,   // Invalid argument
+    E_NFILE      = 23,   // Too many open files
+    E_MFILE      = 24,   // Too many open files in system
+    E_NOSPC      = 28,   // No space left on device
+    E_PIPE       = 32,   // Broken pipe
+    E_RANGE      = 34,   // Math result not representable
+
+    // Flux-specific errors (>= 128 to prevent collision with errno)
+    E_NULLPTR    = 128,  // Null pointer
+    E_DIVZERO    = 129,  // Division by zero
+    E_OVERFLOW   = 130,  // Arithmetic overflow
+    E_STACK      = 131,  // Stack overflow
+    E_TYPE       = 132,  // Type mismatch
+    E_BOUNDS     = 133,  // Index out of array bounds
+    E_UNINIT     = 134,  // Uninitialized variable
+    E_USER       = 200,  // Base for user-defined errors
+    E_CUSTOM     = 255   // Last custom error
+};

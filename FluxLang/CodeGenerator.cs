@@ -9,23 +9,23 @@ public class CodeGenerator
     private readonly ProgramNode _program;
     private StringBuilder _asm = new StringBuilder();
     private readonly StringBuilder _asmData = new StringBuilder();
+    private readonly StringBuilder _asmBss = new StringBuilder();
     private readonly Dictionary<string, int> _stackMap = new Dictionary<string, int>();
     private readonly Dictionary<string, string> _typeMap = new Dictionary<string, string>();
     private readonly Dictionary<string, (int Offset, int Size)> _staticArrays = new Dictionary<string, (int, int)>();
+    private readonly Dictionary<string, int> _enumConstants = new Dictionary<string, int>();
     private int _stackOffset = 0;
     private int _msgCount = 0;
     private int _ifCount = 0;
     private string? _currentFunctionName = null;
 
     private int _pushDepth = 0;
-    private const int STACK_FRAME_SIZE = 4096;
+    private const int STACK_FRAME_SIZE = 8192;
+    private const int HANDLER_RECORD_SIZE = 32;   // 4 qword
 
     private string[] ParameterRegisters = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 
-    private int _whileCount = 0;
-    private int _doWhileCount = 0;
-    private int _forCount = 0;
-    private int _switchCount = 0;
+    private int _whileCount = 0, _doWhileCount = 0, _forCount = 0, _switchCount = 0, _tryCount = 0;
 
     private readonly Stack<string> _breakLabels = new Stack<string>();
     private readonly Stack<string> _continueLabels = new Stack<string>();
@@ -35,10 +35,9 @@ public class CodeGenerator
 
     private readonly Dictionary<string, StructNode> _structs = new Dictionary<string, StructNode>();
 
-    public CodeGenerator(ProgramNode program)
-    {
-        _program = program;
-    }
+    private bool _usesHandlers = false;
+
+    public CodeGenerator(ProgramNode program) { _program = program; }
 
     public string Generate(string os)
     {
@@ -46,40 +45,65 @@ public class CodeGenerator
         _isWindows = activeOs.Contains("win");
         _p = _isWindows ? "" : "_";
 
-        if (_isWindows)
-            ParameterRegisters = new string[] { "rcx", "rdx", "r8", "r9" };
-        else
-            ParameterRegisters = new string[] { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+        if (_isWindows) ParameterRegisters = new string[] { "rcx", "rdx", "r8", "r9" };
+        else ParameterRegisters = new string[] { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 
         return RealGenerate(os);
     }
 
     private readonly StringBuilder _asmFunctions = new StringBuilder();
 
+    private void CollectEnumConstants(IEnumerable<AstNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node is EnumNode en)
+            {
+                foreach (var m in en.Members)
+                    _enumConstants[m.MemberName] = m.Value;
+            }
+            else if (node is FunctionDeclNode funcNode)
+            {
+                CollectEnumConstants(funcNode.Body);
+            }
+            else if (node is IfStatementNode ifn)
+            {
+                CollectEnumConstants(ifn.Body);
+                if (ifn.ElseBody != null) CollectEnumConstants(ifn.ElseBody);
+            }
+            else if (node is WhileNode wn) CollectEnumConstants(wn.Body);
+            else if (node is DoWhileNode dwn) CollectEnumConstants(dwn.Body);
+            else if (node is ForNode fn) CollectEnumConstants(fn.Body);
+            else if (node is TryCatchNode tcn)
+            {
+                CollectEnumConstants(tcn.TryBody);
+                CollectEnumConstants(tcn.CatchBody);
+            }
+            else if (node is SwitchNode sn)
+            {
+                foreach (var c in sn.Cases) CollectEnumConstants(c.Body);
+            }
+        }
+    }
+
     private string RealGenerate(string os)
     {
         _structs.Clear();
-        foreach (var stmt in _program.Statements)
-        {
-            if (stmt is StructNode sn) _structs[sn.Name] = sn;
-        }
+        _enumConstants.Clear();
 
-        _asm.Clear();
-        _asmData.Clear();
-        _asmFunctions.Clear();
-        _msgCount = 0;
-        _ifCount = 0;
-        _stackMap.Clear();
-        _typeMap.Clear();
-        _staticArrays.Clear();
-        _stackOffset = 0;
-        _pushDepth = 0;
-        _whileCount = 0;
-        _doWhileCount = 0;
-        _forCount = 0;
-        _switchCount = 0;
-        _breakLabels.Clear();
-        _continueLabels.Clear();
+        foreach (var stmt in _program.Statements)
+            if (stmt is StructNode sn) _structs[sn.Name] = sn;
+
+        CollectEnumConstants(_program.Statements);
+        CollectEnumConstants(_program.Functions);
+
+        _asm.Clear(); _asmData.Clear(); _asmFunctions.Clear(); _asmBss.Clear();
+        _msgCount = 0; _ifCount = 0;
+        _stackMap.Clear(); _typeMap.Clear(); _staticArrays.Clear();
+        _stackOffset = 0; _pushDepth = 0;
+        _whileCount = 0; _doWhileCount = 0; _forCount = 0; _switchCount = 0; _tryCount = 0;
+        _breakLabels.Clear(); _continueLabels.Clear();
+        _usesHandlers = false;
 
         bool hasMain = false;
         foreach (var func in _program.Functions)
@@ -90,13 +114,10 @@ public class CodeGenerator
         }
 
         if (_program.Statements.Count > 0)
-        {
             foreach (var statement in _program.Statements)
                 GenerateStatement(statement, _p);
-        }
 
         var finalAsm = new StringBuilder();
-
         finalAsm.AppendLine($"global {_p}main");
         finalAsm.AppendLine($"extern {_p}malloc");
         finalAsm.AppendLine($"extern {_p}free");
@@ -109,11 +130,8 @@ public class CodeGenerator
         finalAsm.AppendLine($"extern {_p}rand");
         finalAsm.AppendLine($"extern {_p}srand");
         finalAsm.AppendLine($"extern {_p}fgets");
-
-        if (!_isWindows)
-            finalAsm.AppendLine("extern ___stdinp");
-        else
-            finalAsm.AppendLine("extern __acrt_iob_func");
+        if (!_isWindows) finalAsm.AppendLine("extern ___stdinp");
+        else finalAsm.AppendLine("extern __acrt_iob_func");
         finalAsm.AppendLine();
 
         finalAsm.AppendLine("section .data");
@@ -124,15 +142,21 @@ public class CodeGenerator
         finalAsm.AppendLine("   format_str db \"%s\", 0");
         finalAsm.AppendLine("   format_double db \"%f\", 0");
         finalAsm.AppendLine("   format_float db \"%f\", 0");
+        finalAsm.AppendLine("   format_unhandled db \"Unhandled exception (code %lld)\", 10, 0");
         finalAsm.AppendLine("   align 8");
         finalAsm.AppendLine("   double_zero dq 0x0000000000000000");
         finalAsm.AppendLine("   float_zero dd 0x00000000");
         finalAsm.Append(_asmData.ToString());
         finalAsm.AppendLine();
 
+        finalAsm.AppendLine("section .bss");
+        finalAsm.AppendLine("   align 8");
+        finalAsm.AppendLine("   __flux_handler_top resq 1");
+        finalAsm.AppendLine("   __flux_handler_stack resq 1024");
+        finalAsm.AppendLine();
+
         finalAsm.AppendLine("section .text");
         finalAsm.AppendLine("   align 16");
-
         finalAsm.Append(_asmFunctions.ToString());
         finalAsm.AppendLine();
 
@@ -142,6 +166,8 @@ public class CodeGenerator
             finalAsm.AppendLine("   push rbp");
             finalAsm.AppendLine("   mov rbp, rsp");
             finalAsm.AppendLine($"   sub rsp, {STACK_FRAME_SIZE}");
+            finalAsm.AppendLine("   lea rax, [rel __flux_handler_stack]");
+            finalAsm.AppendLine("   mov [rel __flux_handler_top], rax");
             finalAsm.AppendLine();
             finalAsm.Append(_asm.ToString());
             finalAsm.AppendLine();
@@ -179,34 +205,70 @@ public class CodeGenerator
         if (needsAlign) _asm.AppendLine("   add rsp, 8");
     }
 
+    private void EmitThrow(string p)
+    {
+        string unhandledLabel = $".unhandled_exc_{Guid.NewGuid():N}";
+        string doneLabel = $".throw_done_{Guid.NewGuid():N}";
+
+        _asm.AppendLine("   mov rbx, rax");
+        _asm.AppendLine("   mov r10, [rel __flux_handler_top]");
+        _asm.AppendLine("   lea r11, [rel __flux_handler_stack]");
+        _asm.AppendLine("   cmp r10, r11");
+        _asm.AppendLine($"   je {unhandledLabel}");
+
+        _asm.AppendLine("   sub r10, 32");
+        _asm.AppendLine("   mov [rel __flux_handler_top], r10");
+
+        _asm.AppendLine("   mov rsp, [r10]");
+        _asm.AppendLine("   mov rbp, [r10+8]");
+        _asm.AppendLine("   mov rax, [r10+16]");
+        _asm.AppendLine("   mov rcx, [r10+24]");
+        _asm.AppendLine("   test rcx, rcx");
+        _asm.AppendLine($"   je {doneLabel}_nocaught");
+        _asm.AppendLine("   mov [rbp+rcx], rbx");
+        _asm.AppendLine($"{doneLabel}_nocaught:");
+        _asm.AppendLine("   jmp rax");
+
+        _asm.AppendLine($"{unhandledLabel}:");
+        string r1 = _isWindows ? "rcx" : "rdi";
+        string r2 = _isWindows ? "rdx" : "rsi";
+        _asm.AppendLine($"   lea {r1}, [rel format_unhandled]");
+        _asm.AppendLine($"   mov {r2}, rbx");
+        _asm.AppendLine("   mov al, 0");
+        EmitExternalCall("printf", p);
+        string exitReg = _isWindows ? "rcx" : "rdi";
+        _asm.AppendLine($"   mov {exitReg}, rbx");
+        EmitExternalCall("exit", p);
+        _asm.AppendLine("   ud2");
+        _asm.AppendLine($"{doneLabel}:");
+    }
+
     private void GenerateFunction(FunctionDeclNode func, string p)
     {
         _currentFunctionName = func.Name;
-        _stackMap.Clear();
-        _typeMap.Clear();
-        _staticArrays.Clear();
-        _stackOffset = 0;
-        _pushDepth = 0;
+        _stackMap.Clear(); _typeMap.Clear(); _staticArrays.Clear();
+        _stackOffset = 0; _pushDepth = 0;
 
         string asmName = $"{p}{func.Name}";
-
         _asmFunctions.AppendLine($"{asmName}:");
         _asmFunctions.AppendLine("   push rbp");
         _asmFunctions.AppendLine("   mov rbp, rsp");
         _asmFunctions.AppendLine($"   sub rsp, {STACK_FRAME_SIZE}");
+
+        if (func.Name == "main")
+        {
+            _asmFunctions.AppendLine("   lea rax, [rel __flux_handler_stack]");
+            _asmFunctions.AppendLine("   mov [rel __flux_handler_top], rax");
+        }
 
         for (int i = 0; i < func.Parameters.Count; i++)
         {
             var param = func.Parameters[i];
             _stackOffset -= 8;
             _stackMap[param.Name] = _stackOffset;
-
             string type = param.Type;
-            if (_structs.ContainsKey(type))
-                type = "*" + type;
-
+            if (_structs.ContainsKey(type)) type = "*" + type;
             _typeMap[param.Name] = type;
-
             if (type == "double" || type == "float")
                 _asmFunctions.AppendLine($"   movsd [rbp{_stackOffset}], xmm{i}");
             else
@@ -224,8 +286,7 @@ public class CodeGenerator
         _asmFunctions.Append(funcBody.ToString());
 
         _asmFunctions.AppendLine($"   .exit_{func.Name}:");
-        if (func.Name == "main")
-            _asmFunctions.AppendLine("   mov rax, 0");
+        if (func.Name == "main") _asmFunctions.AppendLine("   mov rax, 0");
         _asmFunctions.AppendLine("   leave");
         _asmFunctions.AppendLine("   ret");
         _asmFunctions.AppendLine();
@@ -235,18 +296,12 @@ public class CodeGenerator
 
     private void GenerateStatement(AstNode node, string p)
     {
-        if (node is DoubleSlashNode doubSlashNode)
-        {
-            GenerateComment(doubSlashNode);
-        }
-        else if (node is TypedefNode || node is EnumNode)
-        {
-        }
+        if (node is DoubleSlashNode d) { GenerateComment(d); }
+        else if (node is TypedefNode || node is EnumNode) { }
         else if (node is VarDeclNode varDecl)
         {
             string type = varDecl.Type;
-            if (_structs.ContainsKey(type))
-                type = "*" + type;
+            if (_structs.ContainsKey(type)) type = "*" + type;
 
             if (varDecl.StaticArraySize > 0)
             {
@@ -265,12 +320,9 @@ public class CodeGenerator
                         GenerateExpression(varDecl.ArrayInitializers[i], p);
                         int elemOffset = _stackOffset + (i * elementSize);
                         string sign = elemOffset >= 0 ? "+" : "";
-                        if (elementSize == 1)
-                            _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], al");
-                        else if (elementSize == 4)
-                            _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], eax");
-                        else
-                            _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], rax");
+                        if (elementSize == 1) _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], al");
+                        else if (elementSize == 4) _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], eax");
+                        else _asm.AppendLine($"   mov [rbp{sign}{elemOffset}], rax");
                     }
                 }
                 else
@@ -303,46 +355,34 @@ public class CodeGenerator
             _typeMap[varDecl.Name] = type;
 
             int effSize = GetSizeOfType(type);
-            if (effSize == 1)
-                _asm.AppendLine($"   mov [rbp{_stackOffset}], al");
-            else if (effSize == 4)
-                _asm.AppendLine($"   mov [rbp{_stackOffset}], eax");
-            else
-                _asm.AppendLine($"   mov [rbp{_stackOffset}], rax");
+            if (effSize == 1) _asm.AppendLine($"   mov [rbp{_stackOffset}], al");
+            else if (effSize == 4) _asm.AppendLine($"   mov [rbp{_stackOffset}], eax");
+            else _asm.AppendLine($"   mov [rbp{_stackOffset}], rax");
         }
         else if (node is AssignmentNode assignNode)
         {
             if (_stackMap.TryGetValue(assignNode.Name, out int offset))
             {
                 string type = _typeMap[assignNode.Name];
-
                 if (assignNode.CompoundOp != null)
                 {
                     _asm.AppendLine($"   mov rax, [rbp{offset}]");
-                    _asm.AppendLine("   push rax");
-                    _pushDepth++;
+                    _asm.AppendLine("   push rax"); _pushDepth++;
                     GenerateExpression(assignNode.Expression, p);
                     _asm.AppendLine("   mov rcx, rax");
-                    _asm.AppendLine("   pop rax");
-                    _pushDepth--;
+                    _asm.AppendLine("   pop rax"); _pushDepth--;
                     string binOp = assignNode.CompoundOp.Substring(0, 1);
                     EmitBinaryOp(binOp, GetExpressionType(new IdentifierNode(assignNode.Name)) ?? type);
                 }
-                else
-                {
-                    GenerateExpression(assignNode.Expression, p);
-                }
+                else GenerateExpression(assignNode.Expression, p);
 
                 if (assignNode.Expression is StringLiteralNode && _typeMap[assignNode.Name] == "char")
                     _typeMap[assignNode.Name] = "*char";
 
                 int sz = GetSizeOfType(_typeMap[assignNode.Name]);
-                if (sz == 1)
-                    _asm.AppendLine($"   mov [rbp{offset}], al");
-                else if (sz == 4)
-                    _asm.AppendLine($"   mov [rbp{offset}], eax");
-                else
-                    _asm.AppendLine($"   mov [rbp{offset}], rax");
+                if (sz == 1) _asm.AppendLine($"   mov [rbp{offset}], al");
+                else if (sz == 4) _asm.AppendLine($"   mov [rbp{offset}], eax");
+                else _asm.AppendLine($"   mov [rbp{offset}], rax");
             }
             else throw new Exception($"Variable '{assignNode.Name}' not defined");
         }
@@ -358,22 +398,26 @@ public class CodeGenerator
         }
         else if (node is FreeNode freeNode)
         {
-            int offset = _stackMap[freeNode.VarName];
-            string targetReg = _isWindows ? "rcx" : "rdi";
-            _asm.AppendLine($"   mov {targetReg}, [rbp{offset}]");
-            EmitExternalCall("free", p);
+            if (_stackMap.TryGetValue(freeNode.VarName, out int offset))
+            {
+                string targetReg = _isWindows ? "rcx" : "rdi";
+                string skipLabel = $".free_skip_{Guid.NewGuid():N}";
+                _asm.AppendLine($"   mov {targetReg}, [rbp{offset}]");
+                _asm.AppendLine($"   test {targetReg}, {targetReg}");
+                _asm.AppendLine($"   je {skipLabel}");
+                EmitExternalCall("free", p);
+                _asm.AppendLine($"{skipLabel}:");
+            }
         }
         else if (node is DerefAssignNode derefNode)
         {
             GenerateExpression(derefNode.Value, p);
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
+            _asm.AppendLine("   push rax"); _pushDepth++;
             int offset = _stackMap[derefNode.PointerName];
             string type = _typeMap.ContainsKey(derefNode.PointerName) ? _typeMap[derefNode.PointerName] : "ptr";
             int elementSize = GetElementSize(type);
             _asm.AppendLine($"   mov rdx, [rbp{offset}]");
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             if (elementSize == 1) _asm.AppendLine("   mov [rdx], al");
             else if (elementSize == 4) _asm.AppendLine("   mov [rdx], eax");
             else _asm.AppendLine("   mov [rdx], rax");
@@ -426,7 +470,7 @@ public class CodeGenerator
                 {
                     _asm.AppendLine($"   mov rdx, [rbp{offset}]");
                     _asm.AppendLine("   movq xmm1, rdx");
-                    _asm.AppendLine("   lea rcx, [rel format_double]");
+                    _asm.AppendLine($"   lea rcx, [rel format_double]");
                     EmitExternalCall("printf", p);
                     return;
                 }
@@ -509,12 +553,10 @@ public class CodeGenerator
             for (int i = 0; i < switchNode.Cases.Count; i++)
             {
                 if (switchNode.Cases[i].CaseValue == null) continue;
-                _asm.AppendLine("   push rcx");
-                _pushDepth++;
+                _asm.AppendLine("   push rcx"); _pushDepth++;
                 GenerateExpression(switchNode.Cases[i].CaseValue!, p);
                 _asm.AppendLine("   mov rdx, rax");
-                _asm.AppendLine("   pop rcx");
-                _pushDepth--;
+                _asm.AppendLine("   pop rcx"); _pushDepth--;
                 _asm.AppendLine("   cmp rcx, rdx");
                 _asm.AppendLine($"   je {caseLabels[i]}");
             }
@@ -561,16 +603,12 @@ public class CodeGenerator
                 string type = _typeMap.ContainsKey(arrayAssign.ArrayName) ? _typeMap[arrayAssign.ArrayName] : "ptr";
                 int elementSize = GetElementSize(type);
                 GenerateExpression(arrayAssign.Index, p);
-                _asm.AppendLine("   push rax");
-                _pushDepth++;
+                _asm.AppendLine("   push rax"); _pushDepth++;
                 GenerateExpression(arrayAssign.Value, p);
                 _asm.AppendLine("   mov rcx, rax");
-                _asm.AppendLine("   pop rax");
-                _pushDepth--;
-                if (_staticArrays.ContainsKey(arrayAssign.ArrayName))
-                    _asm.AppendLine($"   lea rdx, [rbp{offset}]");
-                else
-                    _asm.AppendLine($"   mov rdx, [rbp{offset}]");
+                _asm.AppendLine("   pop rax"); _pushDepth--;
+                if (_staticArrays.ContainsKey(arrayAssign.ArrayName)) _asm.AppendLine($"   lea rdx, [rbp{offset}]");
+                else _asm.AppendLine($"   mov rdx, [rbp{offset}]");
                 if (elementSize == 8) _asm.AppendLine("   shl rax, 3");
                 else if (elementSize == 4) _asm.AppendLine("   shl rax, 2");
                 _asm.AppendLine("   add rdx, rax");
@@ -584,16 +622,14 @@ public class CodeGenerator
         else if (node is StructAssignNode structAssign)
         {
             GenerateExpression(structAssign.Value, p);
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
+            _asm.AppendLine("   push rax"); _pushDepth++;
             GenerateExpression(structAssign.StructPtr, p);
             _asm.AppendLine("   mov rdx, rax");
             string? structType = GetExpressionType(structAssign.StructPtr);
             if (structType == null) throw new Exception("Could not determine struct type");
             string structName = structType.TrimStart('*');
             int offset = GetFieldOffset(structName, structAssign.FieldName);
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             _asm.AppendLine($"   mov [rdx + {offset}], rax");
         }
         else if (node is ExitNode exitNode)
@@ -609,15 +645,13 @@ public class CodeGenerator
             int currentWhile = _whileCount;
             string labelStart = $".while_start{currentWhile}";
             string labelEnd = $".while_end{currentWhile}";
-            _breakLabels.Push(labelEnd);
-            _continueLabels.Push(labelStart);
+            _breakLabels.Push(labelEnd); _continueLabels.Push(labelStart);
             _asm.AppendLine($"{labelStart}:");
             GenerateCondition(whileNode.Condition, labelEnd, true, p);
             foreach (var bodyStatement in whileNode.Body) GenerateStatement(bodyStatement, p);
             _asm.AppendLine($"   jmp {labelStart}");
             _asm.AppendLine($"{labelEnd}:");
-            _breakLabels.Pop();
-            _continueLabels.Pop();
+            _breakLabels.Pop(); _continueLabels.Pop();
         }
         else if (node is DoWhileNode doWhileNode)
         {
@@ -626,16 +660,14 @@ public class CodeGenerator
             string labelStart = $".do_while_start{currentDoWhile}";
             string labelEnd = $".do_while_end{currentDoWhile}";
             string labelCond = $".do_while_cond{currentDoWhile}";
-            _breakLabels.Push(labelEnd);
-            _continueLabels.Push(labelCond);
+            _breakLabels.Push(labelEnd); _continueLabels.Push(labelCond);
             _asm.AppendLine($"{labelStart}:");
             foreach (var bodyStatement in doWhileNode.Body) GenerateStatement(bodyStatement, p);
             _asm.AppendLine($"{labelCond}:");
             GenerateCondition(doWhileNode.Condition, labelEnd, true, p);
             _asm.AppendLine($"   jmp {labelStart}");
             _asm.AppendLine($"{labelEnd}:");
-            _breakLabels.Pop();
-            _continueLabels.Pop();
+            _breakLabels.Pop(); _continueLabels.Pop();
         }
         else if (node is ForNode forNode)
         {
@@ -644,8 +676,7 @@ public class CodeGenerator
             string labelStart = $".for_start{currentFor}";
             string labelEnd = $".for_end{currentFor}";
             string labelIter = $".for_iter{currentFor}";
-            _breakLabels.Push(labelEnd);
-            _continueLabels.Push(labelIter);
+            _breakLabels.Push(labelEnd); _continueLabels.Push(labelIter);
             if (forNode.Initialization != null) GenerateStatement(forNode.Initialization, p);
             _asm.AppendLine($"{labelStart}:");
             if (forNode.Condition != null) GenerateCondition(forNode.Condition, labelEnd, true, p);
@@ -656,17 +687,61 @@ public class CodeGenerator
                 if (forNode.Iteration is AssignmentNode || forNode.Iteration is ArrayAssignNode ||
                     forNode.Iteration is FunctionCallNode || forNode.Iteration is IncrementNode)
                     GenerateStatement(forNode.Iteration, p);
-                else
-                    GenerateExpression(forNode.Iteration, p);
+                else GenerateExpression(forNode.Iteration, p);
             }
             _asm.AppendLine($"   jmp {labelStart}");
             _asm.AppendLine($"{labelEnd}:");
-            _breakLabels.Pop();
-            _continueLabels.Pop();
+            _breakLabels.Pop(); _continueLabels.Pop();
         }
         else if (node is StructNode structNode)
         {
             _structs[structNode.Name] = structNode;
+        }
+        else if (node is TryCatchNode tryCatch)
+        {
+            _usesHandlers = true;
+            _tryCount++;
+            int currentTry = _tryCount;
+            string labelCatch = $".try_catch{currentTry}";
+            string labelEnd = $".try_end{currentTry}";
+
+            _stackOffset -= 8;
+            int catchVarOffset = _stackOffset;
+            _stackMap[tryCatch.CatchExceptionVar] = catchVarOffset;
+            _typeMap[tryCatch.CatchExceptionVar] = "int";
+
+            _asm.AppendLine("   mov r10, [rel __flux_handler_top]");
+            _asm.AppendLine("   mov [r10], rsp");
+            _asm.AppendLine("   mov [r10+8], rbp");
+            _asm.AppendLine($"   lea rax, [rel {labelCatch}]");
+            _asm.AppendLine("   mov [r10+16], rax");
+            _asm.AppendLine($"   mov qword [r10+24], {catchVarOffset}");
+            _asm.AppendLine("   add r10, 32");
+            _asm.AppendLine("   mov [rel __flux_handler_top], r10");
+
+            foreach (var stmt in tryCatch.TryBody) GenerateStatement(stmt, p);
+
+            _asm.AppendLine("   mov r10, [rel __flux_handler_top]");
+            _asm.AppendLine("   sub r10, 32");
+            _asm.AppendLine("   mov [rel __flux_handler_top], r10");
+            _asm.AppendLine($"   jmp {labelEnd}");
+
+            _asm.AppendLine($"{labelCatch}:");
+            foreach (var stmt in tryCatch.CatchBody) GenerateStatement(stmt, p);
+
+            _asm.AppendLine($"{labelEnd}:");
+        }
+        else if (node is ThrowNode throwNode)
+        {
+            _usesHandlers = true;
+            GenerateExpression(throwNode.ErrorCodeExpr, p);
+            EmitThrow(p);
+        }
+        else if (node is SetErrorCodeNode setErr)
+        {
+            _usesHandlers = true;
+            GenerateExpression(setErr.ErrorCodeExpr, p);
+            EmitThrow(p);
         }
     }
 
@@ -723,16 +798,8 @@ public class CodeGenerator
             case "&": _asm.AppendLine("   and rax, rcx"); break;
             case "|": _asm.AppendLine("   or rax, rcx"); break;
             case "^": _asm.AppendLine("   xor rax, rcx"); break;
-            case "<<":
-                _asm.AppendLine("   mov rdx, rcx");
-                _asm.AppendLine("   mov rcx, rdx");
-                _asm.AppendLine("   shl rax, cl");
-                break;
-            case ">>":
-                _asm.AppendLine("   mov rdx, rcx");
-                _asm.AppendLine("   mov rcx, rdx");
-                _asm.AppendLine("   sar rax, cl");
-                break;
+            case "<<": _asm.AppendLine("   mov rdx, rcx"); _asm.AppendLine("   mov rcx, rdx"); _asm.AppendLine("   shl rax, cl"); break;
+            case ">>": _asm.AppendLine("   mov rdx, rcx"); _asm.AppendLine("   mov rcx, rdx"); _asm.AppendLine("   sar rax, cl"); break;
             case "&&":
                 _asm.AppendLine("   cmp rax, 0");
                 _asm.AppendLine("   setne al");
@@ -769,12 +836,10 @@ public class CodeGenerator
         else if (node is InputStrNode inputStr)
         {
             GenerateExpression(inputStr.Buffer, p);
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
+            _asm.AppendLine("   push rax"); _pushDepth++;
             GenerateExpression(inputStr.MaxLen, p);
             _asm.AppendLine("   mov r8, rax");
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             string r1 = _isWindows ? "rcx" : "rdi";
             string r2 = _isWindows ? "rdx" : "rsi";
             string r3 = _isWindows ? "r8" : "rdx";
@@ -860,10 +925,8 @@ public class CodeGenerator
                 bool isStaticArray = _staticArrays.ContainsKey(arrayAccess.ArrayName);
                 GenerateExpression(arrayAccess.Index, p);
                 _asm.AppendLine("   mov rcx, rax");
-                if (isStaticArray)
-                    _asm.AppendLine($"   lea rdx, [rbp{offset}]");
-                else
-                    _asm.AppendLine($"   mov rdx, [rbp{offset}]");
+                if (isStaticArray) _asm.AppendLine($"   lea rdx, [rbp{offset}]");
+                else _asm.AppendLine($"   mov rdx, [rbp{offset}]");
                 if (elementSize == 8) _asm.AppendLine("   shl rcx, 3");
                 else if (elementSize == 4) _asm.AppendLine("   shl rcx, 2");
                 _asm.AppendLine("   add rdx, rcx");
@@ -886,17 +949,19 @@ public class CodeGenerator
         else if (node is AllocNode allocNode)
         {
             if (allocNode.Size is IdentifierNode id && _structs.ContainsKey(id.Name))
-            {
-                int size = GetStructSize(id.Name);
-                _asm.AppendLine($"   mov rax, {size}");
-            }
-            else
-            {
-                GenerateExpression(allocNode.Size, p);
-            }
+                _asm.AppendLine($"   mov rax, {GetStructSize(id.Name)}");
+            else GenerateExpression(allocNode.Size, p);
+
             string targetReg = _isWindows ? "rcx" : "rdi";
             _asm.AppendLine($"   mov {targetReg}, rax");
             EmitExternalCall("malloc", p);
+
+            string okLabel = $".alloc_ok_{Guid.NewGuid():N}";
+            _asm.AppendLine("   test rax, rax");
+            _asm.AppendLine($"   jne {okLabel}");
+            _asm.AppendLine("   mov rax, 12");
+            EmitThrow(p);
+            _asm.AppendLine($"{okLabel}:");
         }
         else if (node is NumberNode numNode)
         {
@@ -958,6 +1023,8 @@ public class CodeGenerator
                 _asm.AppendLine($"   lea rax, [rbp{arrInfo.Offset}]");
             else if (_stackMap.TryGetValue(idNode.Name, out int offset))
                 _asm.AppendLine($"   mov rax, [rbp{offset}]");
+            else if (_enumConstants.TryGetValue(idNode.Name, out int enumVal))
+                _asm.AppendLine($"   mov rax, {enumVal}   ; enum constant");
             else throw new Exception($"Variable '{idNode.Name}' not defined");
         }
         else if (node is BinaryOpNode opNode)
@@ -973,9 +1040,7 @@ public class CodeGenerator
                 _asm.AppendLine("   cvtsi2sd xmm0, rax");
                 _asm.AppendLine("   movq rax, xmm0");
             }
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
-
+            _asm.AppendLine("   push rax"); _pushDepth++;
             GenerateExpression(opNode.Right, p);
             if (resultIsFloat && rightType != "float" && rightType != "double" && rightType != null)
             {
@@ -983,43 +1048,33 @@ public class CodeGenerator
                 _asm.AppendLine("   movq rax, xmm0");
             }
             _asm.AppendLine("   mov rcx, rax");
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
-
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             EmitBinaryOp(opNode.Operator, resultType ?? "int");
         }
         else if (node is UnaryOpNode unaryNode)
         {
             GenerateExpression(unaryNode.Right, p);
-            if (unaryNode.Operator == "-")
-                _asm.AppendLine("   neg rax");
+            if (unaryNode.Operator == "-") _asm.AppendLine("   neg rax");
             else if (unaryNode.Operator == "!")
             {
                 _asm.AppendLine("   cmp rax, 0");
                 _asm.AppendLine("   sete al");
                 _asm.AppendLine("   movzx rax, al");
             }
-            else if (unaryNode.Operator == "~")
-                _asm.AppendLine("   not rax");
+            else if (unaryNode.Operator == "~") _asm.AppendLine("   not rax");
         }
         else if (node is ComparisonNode compNode)
         {
             GenerateExpression(compNode.Left, p);
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
+            _asm.AppendLine("   push rax"); _pushDepth++;
             GenerateExpression(compNode.Right, p);
             _asm.AppendLine("   mov rcx, rax");
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             _asm.AppendLine("   cmp rax, rcx");
             string setOp = compNode.Operator switch
             {
-                "==" => "sete",
-                "!=" => "setne",
-                "<" => "setl",
-                ">" => "setg",
-                "<=" => "setle",
-                ">=" => "setge",
+                "==" => "sete", "!=" => "setne", "<" => "setl",
+                ">" => "setg", "<=" => "setle", ">=" => "setge",
                 _ => throw new Exception($"Unknown comparison operator: {compNode.Operator}")
             };
             _asm.AppendLine($"   {setOp} al");
@@ -1029,6 +1084,12 @@ public class CodeGenerator
         {
             _asm.AppendLine($"  mov rax, {(boolNode.Value ? 1 : 0)}");
         }
+        else if (node is ThrowNode t)
+        {
+            _usesHandlers = true;
+            GenerateExpression(t.ErrorCodeExpr, p);
+            EmitThrow(p);
+        }
     }
 
     private void GenerateCondition(AstNode condition, string targetLabel, bool jumpIfFalse, string p)
@@ -1036,12 +1097,10 @@ public class CodeGenerator
         if (condition is ComparisonNode comp)
         {
             GenerateExpression(comp.Left, p);
-            _asm.AppendLine("   push rax");
-            _pushDepth++;
+            _asm.AppendLine("   push rax"); _pushDepth++;
             GenerateExpression(comp.Right, p);
             _asm.AppendLine("   mov rcx, rax");
-            _asm.AppendLine("   pop rax");
-            _pushDepth--;
+            _asm.AppendLine("   pop rax"); _pushDepth--;
             _asm.AppendLine("   cmp rax, rcx");
             string jumpOp = comp.Operator switch
             {
@@ -1064,7 +1123,7 @@ public class CodeGenerator
             }
             else
             {
-                string labelEnd = $".and_end{Guid.NewGuid().ToString("N")}";
+                string labelEnd = $".and_end{Guid.NewGuid():N}";
                 GenerateCondition(bin.Left, labelEnd, true, p);
                 GenerateCondition(bin.Right, targetLabel, false, p);
                 _asm.AppendLine($"{labelEnd}:");
@@ -1074,7 +1133,7 @@ public class CodeGenerator
         {
             if (jumpIfFalse)
             {
-                string labelTrue = $".or_true{Guid.NewGuid().ToString("N")}";
+                string labelTrue = $".or_true{Guid.NewGuid():N}";
                 GenerateCondition(binOr.Left, labelTrue, false, p);
                 GenerateCondition(binOr.Right, targetLabel, true, p);
                 _asm.AppendLine($"{labelTrue}:");
@@ -1098,14 +1157,11 @@ public class CodeGenerator
     }
 
     private void GenerateCondition(AstNode condition, string targetLabel, bool jumpIfFalse)
-    {
-        GenerateCondition(condition, targetLabel, jumpIfFalse, _p);
-    }
+        => GenerateCondition(condition, targetLabel, jumpIfFalse, _p);
 
     private void GenerateComment(AstNode node)
     {
-        if (node is DoubleSlashNode comment)
-            _asm.AppendLine($"   ; {comment.Comment}");
+        if (node is DoubleSlashNode comment) _asm.AppendLine($"   ; {comment.Comment}");
     }
 
     private int GetSizeOfType(string type)
@@ -1143,8 +1199,7 @@ public class CodeGenerator
         if (_structs.TryGetValue(structName, out var structNode))
         {
             int size = 0;
-            foreach (var field in structNode.Fields)
-                size += GetSizeOfType(field.Type);
+            foreach (var field in structNode.Fields) size += GetSizeOfType(field.Type);
             return size;
         }
         throw new Exception($"Struct '{structName}' not defined");
@@ -1167,13 +1222,8 @@ public class CodeGenerator
 
     private string? GetExpressionType(AstNode node)
     {
-        if (node is IdentifierNode id)
-        {
-            _typeMap.TryGetValue(id.Name, out string? type);
-            return type;
-        }
-        if (node is FloatLiteralNode fl)
-            return fl.IsFloat ? "float" : "double";
+        if (node is IdentifierNode id) { _typeMap.TryGetValue(id.Name, out string? type); return type; }
+        if (node is FloatLiteralNode fl) return fl.IsFloat ? "float" : "double";
         if (node is StructAccessNode sa)
         {
             string? structType = GetExpressionType(sa.StructPtr);
@@ -1181,21 +1231,16 @@ public class CodeGenerator
             {
                 string structName = structType.TrimStart('*');
                 if (_structs.TryGetValue(structName, out var structNode))
-                {
-                    var field = structNode.Fields.Find(f => f.Name == sa.FieldName);
-                    return field?.Type;
-                }
+                    return structNode.Fields.Find(f => f.Name == sa.FieldName)?.Type;
             }
         }
         if (node is ArrayAccessNode aa)
         {
-            if (_typeMap.TryGetValue(aa.ArrayName, out string? type))
-                if (type.StartsWith("*")) return type.Substring(1);
+            if (_typeMap.TryGetValue(aa.ArrayName, out string? type) && type.StartsWith("*")) return type.Substring(1);
         }
         if (node is DerefExpressionNode deref)
         {
-            if (_typeMap.TryGetValue(deref.PointerName, out string? type))
-                if (type.StartsWith("*")) return type.Substring(1);
+            if (_typeMap.TryGetValue(deref.PointerName, out string? type) && type.StartsWith("*")) return type.Substring(1);
         }
         if (node is BinaryOpNode bin)
         {

@@ -5,12 +5,8 @@ public class Lexer
     private readonly string _source;
     private int _position;
 
-    public Lexer(string source)
-    {
-        _source = source;
-        _position = 0;
-    }
-    
+    public Lexer(string source) { _source = source; _position = 0; }
+
     private char Current => _position >= _source.Length ? '\0' : _source[_position];
     private void Advance() => _position++;
 
@@ -20,55 +16,33 @@ public class Lexer
 
         while (_position < _source.Length)
         {
-            if (char.IsWhiteSpace(Current))
-            {
-                Advance();
-                continue;
-            }
+            if (char.IsWhiteSpace(Current)) { Advance(); continue; }
 
             if (char.IsDigit(Current))
             {
                 string number = "";
                 bool isFloat = false;
-                while (char.IsDigit(Current))
-                {
-                    number += Current;
-                    Advance();
-                }
+                while (char.IsDigit(Current)) { number += Current; Advance(); }
 
                 if (Current == '.' && _position + 1 < _source.Length && char.IsDigit(_source[_position + 1]))
                 {
                     isFloat = true;
-                    number += Current;
-                    Advance();
-                    while (char.IsDigit(Current))
-                    {
-                        number += Current;
-                        Advance();
-                    }
+                    number += Current; Advance();
+                    while (char.IsDigit(Current)) { number += Current; Advance(); }
                 }
 
-                if (Current == 'f' || Current == 'F')
-                {
-                    isFloat = true;
-                    Advance();
-                }
+                if (Current == 'f' || Current == 'F') { isFloat = true; Advance(); }
 
-                if (isFloat)
-                    tokens.Add(new Token(TokenType.FloatLiteral, number));
-                else
-                    tokens.Add(new Token(TokenType.Number, number));
+                tokens.Add(isFloat
+                    ? new Token(TokenType.FloatLiteral, number)
+                    : new Token(TokenType.Number, number));
                 continue;
             }
 
             if (char.IsLetter(Current) || Current == '_')
             {
                 string ident = "";
-                while (char.IsLetterOrDigit(Current) || Current == '_')
-                {
-                    ident += Current;
-                    Advance();
-                }
+                while (char.IsLetterOrDigit(Current) || Current == '_') { ident += Current; Advance(); }
 
                 switch (ident)
                 {
@@ -112,10 +86,13 @@ public class Lexer
                     case "enum": tokens.Add(new Token(TokenType.Enum, ident)); break;
                     case "true": tokens.Add(new Token(TokenType.True, ident)); break;
                     case "false": tokens.Add(new Token(TokenType.False, ident)); break;
+                    case "try": tokens.Add(new Token(TokenType.Try, ident)); break;
+                    case "catch": tokens.Add(new Token(TokenType.Catch, ident)); break;
+                    case "throw": tokens.Add(new Token(TokenType.Throw, ident)); break;
+                    case "setErrorCode": tokens.Add(new Token(TokenType.SetErrorCode, ident)); break;
                     default: tokens.Add(new Token(TokenType.Identifier, ident)); break;
                 }
-                
-                continue;   
+                continue;
             }
 
             switch (Current)
@@ -123,59 +100,44 @@ public class Lexer
                 case '=':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.EqualEqual, "==")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Assign, "=")); }
+                    else tokens.Add(new Token(TokenType.Assign, "="));
                     break;
                 case '!':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.NotEqual, "!=")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Not, "!")); }
+                    else tokens.Add(new Token(TokenType.Not, "!"));
                     break;
                 case '<':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.LessEqual, "<=")); Advance(); }
                     else if (Current == '<') { tokens.Add(new Token(TokenType.ShiftLeft, "<<")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Less, "<")); }
+                    else tokens.Add(new Token(TokenType.Less, "<"));
                     break;
                 case '>':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.GreaterEqual, ">=")); Advance(); }
                     else if (Current == '>') { tokens.Add(new Token(TokenType.ShiftRight, ">>")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Greater, ">")); }
+                    else tokens.Add(new Token(TokenType.Greater, ">"));
                     break;
                 case '&':
                     Advance();
                     if (Current == '&') { tokens.Add(new Token(TokenType.And, "&&")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Ampersand, "&")); }
+                    else tokens.Add(new Token(TokenType.Ampersand, "&"));
                     break;
                 case '|':
                     Advance();
                     if (Current == '|') { tokens.Add(new Token(TokenType.Or, "||")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.BitOr, "|")); }
+                    else tokens.Add(new Token(TokenType.BitOr, "|"));
                     break;
-                case '^':
-                    tokens.Add(new Token(TokenType.BitXor, "^"));
-                    Advance();
-                    break;
-                case '~':
-                    tokens.Add(new Token(TokenType.BitNot, "~"));
-                    Advance();
-                    break;
-                case '(':
-                    tokens.Add(new Token(TokenType.OpenParenthesis, "("));
-                    Advance();
-                    break;
-                case ')':
-                    tokens.Add(new Token(TokenType.CloseParenthesis, ")"));
-                    Advance();
-                    break;
-                case ';':
-                    tokens.Add(new Token(TokenType.Semicolon, ";"));
-                    Advance();
-                    break;
+                case '^': tokens.Add(new Token(TokenType.BitXor, "^")); Advance(); break;
+                case '~': tokens.Add(new Token(TokenType.BitNot, "~")); Advance(); break;
+                case '(': tokens.Add(new Token(TokenType.OpenParenthesis, "(")); Advance(); break;
+                case ')': tokens.Add(new Token(TokenType.CloseParenthesis, ")")); Advance(); break;
+                case ';': tokens.Add(new Token(TokenType.Semicolon, ";")); Advance(); break;
                 case '*':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.StarAssign, "*=")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Asterisk, "*")); }
+                    else tokens.Add(new Token(TokenType.Asterisk, "*"));
                     break;
                 case '"':
                     Advance();
@@ -195,14 +157,10 @@ public class Lexer
                                 default: text += '\\'; text += Current; break;
                             }
                         }
-                        else
-                            text += Current;
+                        else text += Current;
                         Advance();
                     }
-
-                    if (Current == '\0')
-                        throw new Exception("Syntax error: Missing closing ' in the string");
-
+                    if (Current == '\0') throw new Exception("Syntax error: Missing closing ' in the string");
                     Advance();
                     tokens.Add(new Token(TokenType.StringLiteral, text));
                     break;
@@ -211,79 +169,44 @@ public class Lexer
                     if (Current == '>') { tokens.Add(new Token(TokenType.Arrow, "->")); Advance(); }
                     else if (Current == '=') { tokens.Add(new Token(TokenType.MinusAssign, "-=")); Advance(); }
                     else if (Current == '-') { tokens.Add(new Token(TokenType.MinusMinus, "--")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Minus, "-")); }
+                    else tokens.Add(new Token(TokenType.Minus, "-"));
                     break;
                 case '+':
                     Advance();
                     if (Current == '=') { tokens.Add(new Token(TokenType.PlusAssign, "+=")); Advance(); }
                     else if (Current == '+') { tokens.Add(new Token(TokenType.PlusPlus, "++")); Advance(); }
-                    else { tokens.Add(new Token(TokenType.Plus, "+")); }
+                    else tokens.Add(new Token(TokenType.Plus, "+"));
                     break;
-                case '%':
-                    tokens.Add(new Token(TokenType.Percent, "%"));
-                    Advance();
-                    break;
+                case '%': tokens.Add(new Token(TokenType.Percent, "%")); Advance(); break;
                 case '/':
                     Advance();
                     if (Current == '/')
                     {
                         Advance();
                         string comment = "";
-                        while (Current != '\n' && Current != '\0')
-                        {
-                            comment += Current;
-                            Advance();
-                        }
+                        while (Current != '\n' && Current != '\0') { comment += Current; Advance(); }
                         tokens.Add(new Token(TokenType.SlashSlash, comment.Trim()));
                     }
-                    else if (Current == '=')
-                    {
-                        tokens.Add(new Token(TokenType.SlashAssign, "/="));
-                        Advance();
-                    }
-                    else
-                    {
-                        tokens.Add(new Token(TokenType.Slash, "/"));
-                    }
+                    else if (Current == '=') { tokens.Add(new Token(TokenType.SlashAssign, "/=")); Advance(); }
+                    else tokens.Add(new Token(TokenType.Slash, "/"));
                     break;
-                case ',':
-                    tokens.Add(new Token(TokenType.Comma, ","));
-                    Advance();
-                    break;
-                case '[':
-                    tokens.Add(new Token(TokenType.OpenBracket, "["));
-                    Advance();
-                    break;
-                case ']':
-                    tokens.Add(new Token(TokenType.CloseBracket, "]"));
-                    Advance();
-                    break;
-                case '{':
-                    tokens.Add(new Token(TokenType.OpenBrace, "{"));
-                    Advance();
-                    break;
-                case '}':
-                    tokens.Add(new Token(TokenType.CloseBrace, "}"));
-                    Advance();
-                    break;
-                case ':':
-                    tokens.Add(new Token(TokenType.Colon, ":"));
-                    Advance();
-                    break;
+                case ',': tokens.Add(new Token(TokenType.Comma, ",")); Advance(); break;
+                case '[': tokens.Add(new Token(TokenType.OpenBracket, "[")); Advance(); break;
+                case ']': tokens.Add(new Token(TokenType.CloseBracket, "]")); Advance(); break;
+                case '{': tokens.Add(new Token(TokenType.OpenBrace, "{")); Advance(); break;
+                case '}': tokens.Add(new Token(TokenType.CloseBrace, "}")); Advance(); break;
+                case ':': tokens.Add(new Token(TokenType.Colon, ":")); Advance(); break;
                 case '\'':
                     Advance();
-                    char c = Current;
-                    Advance();
-                    if (Current != '\'')
-                        throw new Exception("Syntax error: Missing closing ' after character");
+                    char c = Current; Advance();
+                    if (Current != '\'') throw new Exception("Syntax error: Missing closing ' after character");
                     Advance();
                     tokens.Add(new Token(TokenType.CharLiteral, c.ToString()));
                     break;
-                default:
-                    throw new Exception($"Unexpected character: {Current}");
+                default: throw new Exception($"Unexpected character: {Current}");
             }
         }
-        
+
         tokens.Add(new Token(TokenType.EOF, ""));
         return tokens;
     }
