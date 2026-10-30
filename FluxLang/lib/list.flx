@@ -1,0 +1,51 @@
+struct Node{
+    int value;
+    *Node next;
+};
+
+*Node list_create(int val){
+    *Node n = memory_allocation(16);
+    n->value = val;
+    n->next = 0;
+    return n;
+}
+
+void list_append(*Node head, int val){
+    *Node current = head;
+    while(current->next != 0){
+        current = current->next;
+    }
+    current->next = list_create(val);
+}
+
+int list_length(*Node head){
+    int count = 0;
+    *Node current = head;
+    while(current != 0){
+        count = count + 1;
+        current = current->next;
+    }
+    return count;
+}
+
+int list_get_element(*Node head, int index){
+    int count = 0;
+    *Node current = head;
+    while(current != 0){
+        if(count == index){
+            return current->value;
+        }
+        count = count + 1;
+        current = current->next;
+    }
+    throw 35;
+}
+
+void list_free(*Node head){
+    *Node current = head;
+    while(current != 0){
+        *Node next = current->next;
+        free_memory(current);
+        current = next;
+    }
+}

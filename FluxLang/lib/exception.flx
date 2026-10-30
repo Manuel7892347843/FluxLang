@@ -17,6 +17,7 @@
     E_NOSPC      = 28,   // No space left on device
     E_PIPE       = 32,   // Broken pipe
     E_RANGE      = 34,   // Math result not representable
+    E_NOELEM     = 35,
 
     // Flux-specific errors (>= 128 to prevent collision with errno)
     E_NULLPTR    = 128,  // Null pointer
